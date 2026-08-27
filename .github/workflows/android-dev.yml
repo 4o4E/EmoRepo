@@ -21,13 +21,13 @@ jobs:
         working-directory: EmoRepo
     steps:
       - name: 检出 EmoRepo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: EmoRepo
           fetch-depth: 0
 
       - name: 检出固定 QAux Provider API
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: 4o4E/QAuxiliary
           ref: f6e6aa3d3ec802a372b7e9aaa08cec2b4a509828
@@ -35,16 +35,16 @@ jobs:
           sparse-checkout: loader/emoticon-provider-api
 
       - name: 配置 Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: 配置 Gradle 缓存
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       - name: 配置 Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: 安装 Android SDK 组件
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
@@ -85,7 +85,7 @@ jobs:
         run: bash .github/scripts/collect-apks.sh debug "$VERSION_NAME" dist/dev
 
       - name: 上传 dev Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: EmoRepo-dev-${{ github.run_number }}-${{ github.sha }}
           path: EmoRepo/dist/dev/*
