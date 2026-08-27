@@ -3,8 +3,6 @@ package top.e404.emorepo.repository
 import java.io.File
 import java.io.IOException
 import java.security.SecureRandom
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.recent.RecentCsvCodec
@@ -17,7 +15,7 @@ class RecentUsageRepository(
 ) {
     private val root = rootDirectory.canonicalFile
     private val recentDirectory = File(root, RECENT_DIRECTORY_NAME)
-    private val lock = locks.computeIfAbsent(root.path) { ReentrantLock() }
+    private val lock = RepositoryLocks.forRoot(root)
 
     init {
         validateDeviceId(deviceId)
@@ -41,6 +39,14 @@ class RecentUsageRepository(
                 readDeviceFile(file)
             }
         RecentCsvCodec.merge(records)
+    }
+
+    fun trimCurrentDevice() = lock.withLock {
+        val file = deviceFile(deviceId)
+        if (!file.exists()) return@withLock
+        val current = readDeviceFile(file)
+        val trimmed = current.take(maximumRecords)
+        if (trimmed.size != current.size) writeDeviceFile(file, trimmed)
     }
 
     fun recordUse(packageName: String, name: String, time: Long) = lock.withLock {
@@ -118,11 +124,9 @@ class RecentUsageRepository(
     private fun deviceFile(id: String): File = File(recentDirectory, "$id.csv")
 
     companion object {
-        const val DEFAULT_MAXIMUM_RECORDS = 20
+        const val DEFAULT_MAXIMUM_RECORDS = 30
         private const val RECENT_DIRECTORY_NAME = "recent"
         private val deviceIdPattern = Regex("[A-Za-z0-9_-]{1,48}")
-        private val locks = ConcurrentHashMap<String, ReentrantLock>()
-
         fun generateDeviceId(random: SecureRandom = SecureRandom()): String {
             val bytes = ByteArray(4).also(random::nextBytes)
             return "android-" + bytes.joinToString("") { byte ->

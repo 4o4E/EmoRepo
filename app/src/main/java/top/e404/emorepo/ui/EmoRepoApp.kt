@@ -6,19 +6,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -29,6 +31,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import kotlinx.serialization.Serializable
+import top.e404.emorepo.R
 
 @Serializable
 data object PackListRoute
@@ -45,41 +48,31 @@ data object SettingsRoute
 private data class TopDestination(
     val route: Any,
     val label: String,
-    val iconText: String,
+    val iconText: String? = null,
+    val iconResource: Int? = null,
 )
 
 private val topDestinations = listOf(
-    TopDestination(PackListRoute, "表情列表", "▦"),
-    TopDestination(AddEmoticonsRoute, "添加表情", "+"),
-    TopDestination(SettingsRoute, "软件设置", "⚙"),
+    TopDestination(PackListRoute, "表情列表", iconText = "▦"),
+    TopDestination(AddEmoticonsRoute, "添加表情", iconText = "+"),
+    TopDestination(SettingsRoute, "软件设置", iconResource = R.drawable.ic_settings),
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EmoRepoApp() {
     val state = rememberEmoRepoState()
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
-    val packRoute = if (destination?.hasRoute<PackRoute>() == true) {
-        backStackEntry?.toRoute<PackRoute>()
-    } else {
-        null
-    }
 
     LaunchedEffect(Unit) { state.reload() }
 
+    if (state.setupRequired) {
+        Surface(Modifier.fillMaxSize()) { OnboardingScreen(state) }
+        return
+    }
+
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(packRoute?.packName ?: destination.title()) },
-                navigationIcon = {
-                    if (packRoute != null) {
-                        TextButton(onClick = { navController.popBackStack() }) { Text("返回") }
-                    }
-                },
-            )
-        },
         bottomBar = {
             NavigationBar {
                 topDestinations.forEach { item ->
@@ -94,8 +87,24 @@ fun EmoRepoApp() {
                                 restoreState = true
                             }
                         },
-                        icon = { Text(item.iconText) },
+                        icon = {
+                            if (item.iconResource != null) {
+                                Icon(
+                                    painter = painterResource(item.iconResource),
+                                    contentDescription = null,
+                                )
+                            } else {
+                                Text(item.iconText.orEmpty())
+                            }
+                        },
                         label = { Text(item.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            indicatorColor = Color.Transparent,
+                        ),
                     )
                 }
             }
@@ -110,12 +119,19 @@ fun EmoRepoApp() {
                 composable<PackListRoute> {
                     PackListScreen(
                         state = state,
-                        onOpenPack = { navController.navigate(PackRoute(it)) },
+                        onOpenPack = { packName ->
+                            state.preloadPack(packName)
+                            navController.navigate(PackRoute(packName))
+                        },
                     )
                 }
                 composable<PackRoute> { entry ->
                     val route = entry.toRoute<PackRoute>()
-                    PackManagerScreen(state = state, packName = route.packName)
+                    PackManagerScreen(
+                        state = state,
+                        packName = route.packName,
+                        onBack = { navController.popBackStack() },
+                    )
                 }
                 composable<AddEmoticonsRoute> {
                     AddEmoticonsScreen(state)
@@ -143,12 +159,6 @@ fun EmoRepoApp() {
             }
         }
     }
-}
-
-private fun NavDestination?.title(): String = when {
-    this?.hasRoute<AddEmoticonsRoute>() == true -> "添加表情"
-    this?.hasRoute<SettingsRoute>() == true -> "软件设置"
-    else -> "表情仓"
 }
 
 private fun NavDestination?.belongsTo(route: Any): Boolean = when (route) {

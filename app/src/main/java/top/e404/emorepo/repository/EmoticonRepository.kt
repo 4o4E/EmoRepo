@@ -2,19 +2,20 @@ package top.e404.emorepo.repository
 
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.ProtocolNames
 import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.protocol.index.IndexJsonlCodec
+import top.e404.emorepo.protocol.pack.PackOrderRecord
+import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 
 class EmoticonRepository(
     rootDirectory: File,
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val root = rootDirectory.canonicalFile
-    private val lock = ReentrantLock()
+    private val lock = RepositoryLocks.forRoot(root)
 
     init {
         root.mkdirs()
@@ -22,20 +23,40 @@ class EmoticonRepository(
     }
 
     fun listPacks(): List<EmoticonPack> = lock.withLock {
-        root.listFiles()
-            .orEmpty()
-            .filter { directory ->
-                directory.isDirectory &&
-                    directory.name != "recent" &&
-                    directory.name != ".git" &&
-                    !directory.name.startsWith(".")
-            }
-            .sortedBy { it.name }
-            .map(::readPack)
+        val directories = packDirectories()
+        readPackOrder(directories).map { record ->
+            readPack(directories.first { it.name == record.name }, record.order)
+        }
     }
 
     fun getPack(name: String): EmoticonPack = lock.withLock {
-        readPack(requirePackDirectory(name))
+        val directory = requirePackDirectory(name)
+        readPack(directory, requirePackOrder(name))
+    }
+
+    fun initializePackOrder(): List<EmoticonPack> = lock.withLock {
+        val directories = packDirectories()
+        val index = rootIndexFile()
+        if (!index.exists()) {
+            writePackOrder(temporaryPackOrder(directories))
+        }
+        val order = readPackOrder(directories)
+        order.map { record -> readPack(directories.first { it.name == record.name }, record.order) }
+    }
+
+    fun reorderPacks(names: List<String>): List<EmoticonPack> = lock.withLock {
+        val directories = packDirectories()
+        val currentNames = directories.map { it.name }
+        if (names.size != currentNames.size || names.toSet() != currentNames.toSet()) {
+            throw ProtocolException("pack reorder list must contain every pack exactly once")
+        }
+        val normalized = names.mapIndexed { index, name ->
+            PackOrderRecord(name, (index + 1L) * ORDER_STEP)
+        }
+        writePackOrder(normalized)
+        normalized.map { record ->
+            readPack(directories.first { it.name == record.name }, record.order)
+        }
     }
 
     fun imageFile(packName: String, recordName: String): File = lock.withLock {
@@ -49,18 +70,29 @@ class EmoticonRepository(
     }
 
     fun createPack(name: String): EmoticonPack = lock.withLock {
+        val directories = packDirectories()
+        val currentOrder = readPackOrder(directories)
+        val rootIndex = rootIndexFile()
+        val previousRootContent = rootIndex.takeIf { it.exists() }?.let(AtomicFileStore::readText)
         val directory = resolvePackDirectory(name)
         if (directory.exists()) {
             throw ProtocolException("emoticon pack already exists: $name")
         }
+        val order = nextPackOrder(currentOrder)
         if (!directory.mkdir()) {
             throw IOException("cannot create emoticon pack: $name")
         }
         try {
             writeRecords(directory, emptyList())
-            EmoticonPack(name, emptyList())
+            writePackOrder(currentOrder + PackOrderRecord(name, order))
+            EmoticonPack(name, emptyList(), order)
         } catch (error: Exception) {
             directory.deleteRecursively()
+            if (previousRootContent == null) {
+                rootIndex.delete()
+            } else {
+                runCatching { AtomicFileStore.writeText(rootIndex, previousRootContent) }
+            }
             throw error
         }
     }
@@ -221,8 +253,8 @@ class EmoticonRepository(
         ManagementItemResult(md5, ManagementStatus.FAILED, message = error.message)
     }
 
-    private fun readPack(directory: File): EmoticonPack =
-        EmoticonPack(directory.name, readRecords(directory))
+    private fun readPack(directory: File, order: Long): EmoticonPack =
+        EmoticonPack(directory.name, readRecords(directory), order)
 
     private fun readRecords(directory: File): List<EmoticonRecord> {
         val index = File(directory, INDEX_FILE_NAME)
@@ -240,8 +272,61 @@ class EmoticonRepository(
     private fun writeAndVerify(directory: File, records: List<EmoticonRecord>): EmoticonPack {
         writeRecords(directory, records)
         val verified = readRecords(directory)
-        return EmoticonPack(directory.name, verified)
+        return EmoticonPack(directory.name, verified, requirePackOrder(directory.name))
     }
+
+    private fun packDirectories(): List<File> = root.listFiles()
+        .orEmpty()
+        .filter { directory ->
+            directory.isDirectory &&
+                directory.name != "recent" &&
+                directory.name != ".git" &&
+                !directory.name.startsWith(".")
+        }
+        .sortedBy { it.name }
+
+    private fun readPackOrder(directories: List<File>): List<PackOrderRecord> {
+        val index = rootIndexFile()
+        AtomicFileStore.recover(index)
+        if (!index.exists()) return temporaryPackOrder(directories)
+        val records = RootIndexJsonlCodec.decode(AtomicFileStore.readText(index))
+        val directoryNames = directories.map { it.name }.toSet()
+        val recordNames = records.map { it.name }.toSet()
+        if (recordNames != directoryNames) {
+            val missing = (directoryNames - recordNames).sorted()
+            val extra = (recordNames - directoryNames).sorted()
+            throw ProtocolException(
+                "root index.jsonl does not match pack directories; missing=$missing, extra=$extra",
+            )
+        }
+        return records.sortedWith(compareBy<PackOrderRecord> { it.order }.thenBy { it.name })
+    }
+
+    private fun temporaryPackOrder(directories: List<File>): List<PackOrderRecord> =
+        directories.sortedBy { it.name }.mapIndexed { index, directory ->
+            PackOrderRecord(directory.name, (index + 1L) * ORDER_STEP)
+        }
+
+    private fun writePackOrder(records: List<PackOrderRecord>) {
+        AtomicFileStore.writeText(rootIndexFile(), RootIndexJsonlCodec.encode(records))
+        RootIndexJsonlCodec.decode(AtomicFileStore.readText(rootIndexFile()))
+    }
+
+    private fun requirePackOrder(name: String): Long {
+        val directories = packDirectories()
+        return readPackOrder(directories).firstOrNull { it.name == name }?.order
+            ?: throw ProtocolException("root index.jsonl has no pack: $name")
+    }
+
+    private fun nextPackOrder(records: List<PackOrderRecord>): Long {
+        val maximum = records.maxOfOrNull { it.order } ?: 0L
+        if (maximum > Long.MAX_VALUE - ORDER_STEP) {
+            throw ProtocolException("pack order space exhausted; normalize packs first")
+        }
+        return maximum + ORDER_STEP
+    }
+
+    private fun rootIndexFile(): File = File(root, INDEX_FILE_NAME)
 
     private fun resolvePackDirectory(name: String): File {
         ProtocolNames.requireSafeSegment(name, "pack name")

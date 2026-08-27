@@ -45,6 +45,19 @@ class RecentUsageRepositoryTest {
     }
 
     @Test
+    fun trimImmediatelyAppliesChangedLimit() {
+        val original = repository(maximumRecords = 20)
+        original.recordUse("cats", "a.png", 30)
+        original.recordUse("dogs", "b.gif", 20)
+        original.recordUse("other", "c.webp", 10)
+
+        val reduced = repository(maximumRecords = 1)
+        reduced.trimCurrentDevice()
+
+        assertEquals(listOf(RecentUsageRecord("cats", "a.png", 30)), reduced.readCurrentDevice())
+    }
+
+    @Test
     fun removeOnlyChangesCurrentDeviceFile() {
         val current = repository(deviceId = "android-current")
         val other = repository(deviceId = "android-other")
@@ -124,9 +137,14 @@ class RecentUsageRepositoryTest {
         assertEquals("android-01020304", RecentUsageRepository.generateDeviceId(deterministic))
     }
 
+    @Test
+    fun defaultMaximumRecordsIsThirty() {
+        assertEquals(30, repository().maximumRecords)
+    }
+
     private fun repository(
         deviceId: String = "android-test",
-        maximumRecords: Int = 20,
+        maximumRecords: Int = RecentUsageRepository.DEFAULT_MAXIMUM_RECORDS,
     ): RecentUsageRepository = RecentUsageRepository(
         File(temporaryFolder.root, "repository"),
         deviceId,

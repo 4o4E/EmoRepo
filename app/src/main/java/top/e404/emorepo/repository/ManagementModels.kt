@@ -5,6 +5,7 @@ import top.e404.emorepo.protocol.index.EmoticonRecord
 data class EmoticonPack(
     val name: String,
     val records: List<EmoticonRecord>,
+    val order: Long,
 )
 
 data class ImportCandidate(

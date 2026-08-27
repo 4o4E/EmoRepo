@@ -6,13 +6,66 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import top.e404.emorepo.protocol.ProtocolException
+import top.e404.emorepo.protocol.pack.PackOrderRecord
+import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 
 class EmoticonRepositoryTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun missingRootIndexUsesDirectoryOrderWithoutWriting() {
+        createLegacyPack("zeta")
+        createLegacyPack("alpha")
+        val repository = repository()
+
+        val packs = repository.listPacks()
+
+        assertEquals(listOf("alpha", "zeta"), packs.map { it.name })
+        assertEquals(listOf(1_024L, 2_048L), packs.map { it.order })
+        assertFalse(File(temporaryFolder.root, "repository/index.jsonl").exists())
+    }
+
+    @Test
+    fun rootIndexControlsPackOrderAndMustMatchDirectories() {
+        createLegacyPack("alpha")
+        createLegacyPack("zeta")
+        val rootIndex = File(temporaryFolder.root, "repository/index.jsonl")
+        rootIndex.writeText(
+            RootIndexJsonlCodec.encode(
+                listOf(PackOrderRecord("zeta", 1_024), PackOrderRecord("alpha", 2_048)),
+            ),
+        )
+        val repository = repository()
+
+        assertEquals(listOf("zeta", "alpha"), repository.listPacks().map { it.name })
+
+        rootIndex.writeText(RootIndexJsonlCodec.encode(listOf(PackOrderRecord("alpha", 1_024))))
+        assertThrows(ProtocolException::class.java) { repository.listPacks() }
+    }
+
+    @Test
+    fun initializeAndReorderPacksWriteCanonicalRootIndex() {
+        createLegacyPack("zeta")
+        createLegacyPack("alpha")
+        val repository = repository()
+
+        repository.initializePackOrder()
+        val reordered = repository.reorderPacks(listOf("zeta", "alpha"))
+
+        assertEquals(listOf("zeta", "alpha"), reordered.map { it.name })
+        assertEquals(
+            listOf(PackOrderRecord("zeta", 1_024), PackOrderRecord("alpha", 2_048)),
+            RootIndexJsonlCodec.decode(
+                File(temporaryFolder.root, "repository/index.jsonl").readText(),
+            ),
+        )
+    }
 
     @Test
     fun createPackAndImportUseContentAddressedName() {
@@ -172,6 +225,12 @@ class EmoticonRepositoryTest {
         File(temporaryFolder.root, "repository"),
         currentTimeMillis = { 1000L },
     )
+
+    private fun createLegacyPack(name: String) {
+        val directory = File(temporaryFolder.root, "repository/$name")
+        assertTrue(directory.mkdirs())
+        File(directory, "index.jsonl").writeText("")
+    }
 
     private fun png(marker: Int): ByteArray = byteArrayOf(
         0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, marker.toByte(),

@@ -6,6 +6,8 @@ pluginManagement {
     }
 }
 
+includeBuild("../QAuxiliary/loader/emoticon-provider-api")
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {

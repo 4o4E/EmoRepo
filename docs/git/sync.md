@@ -1,7 +1,7 @@
 # Git 同步
 
-- 状态：`confirmed`
-- 更新：2026-08-25
+- 状态：`implemented`
+- 更新：2026-08-26
 
 ## 引擎和边界
 
@@ -57,3 +57,11 @@
 - 同步失败不能阻塞本地表情读取；状态和错误交给 App 展示。
 - Git 作者名和邮箱由用户按仓库配置；缺失时禁止创建提交，但允许拉取更新。
 - 默认提交信息为 `Update local emoticons`，允许用户配置。
+
+## 2026-08-26 GitHub 真机代理验证
+
+- 创建 private 测试仓库 `4o4E/emorepo-integration-test`，从 `F:\Desktop\face` 的已提交历史复制，不包含来源工作树中未提交的 `recent/404E.csv`。
+- 独立副本将旧 `index.json` 转换为当前根/包内 `index.jsonl`，并在校验字节一致后删除 2 个重复 MD5 文件；协议转换提交为 `8408305`。
+- Android 测试机通过当前 VPN/代理完成 private 仓库完整 clone、创建提交、fetch/rebase、push 和第二次完整 clone 校验，耗时 290 秒。
+- Android 推送提交为 `92fb9b5 test: 验证 Android 代理推送`，二次 clone 读取到相同标记内容。
+- 测试使用一次性 app 私有 Token 文件；无论成功失败均在 `finally` 删除。验收后已确认临时 Token 和约 4 GiB 双克隆缓存均不存在。

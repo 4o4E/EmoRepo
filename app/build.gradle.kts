@@ -45,6 +45,7 @@ android {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
+    compileOnly("io.github.qauxv:emoticon-provider-api:1.0.0")
     implementation("org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
     implementation("com.google.code.gson:gson:2.14.0")
     implementation(composeBom)
@@ -54,13 +55,19 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.8")
+    implementation("androidx.work:work-runtime:2.11.2")
+    implementation("me.saket.telephoto:zoomable:0.19.0")
+    implementation("io.coil-kt.coil3:coil-compose:3.4.0")
+    implementation("io.coil-kt.coil3:coil-gif:3.4.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation("sh.calvin.reorderable:reorderable:3.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

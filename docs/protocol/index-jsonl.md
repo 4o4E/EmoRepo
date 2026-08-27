@@ -3,6 +3,8 @@
 - 状态：`confirmed`
 - 更新：2026-08-25
 
+本文只规定 `<pack-name>/index.jsonl` 的表情记录。仓库根目录同名文件按 [`root-index-jsonl.md`](root-index-jsonl.md) 保存表情包顺序。
+
 ## 编码
 
 - UTF-8，无 BOM。
