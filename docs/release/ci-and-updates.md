@@ -1,6 +1,6 @@
 # CI、发布与更新索引
 
-- 状态：`implemented`
+- 状态：`verified`
 - 更新：2026-08-27
 
 ## 构建渠道
@@ -61,6 +61,8 @@ commit: f6e6aa3d3ec802a372b7e9aaa08cec2b4a509828
 https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 ```
 
+当前 GitHub 仓库是 private，上述地址和 Release 资产需要有仓库读取权限的 GitHub 身份认证。若 App 未来需要无 Token 自动检查更新，必须先确认公开仓库、公开镜像或受控更新服务中的一种来源；不能在 APK 内内置 GitHub Token。
+
 索引使用 UTF-8 JSON，结构如下：
 
 ```json
@@ -104,3 +106,10 @@ https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 - GitHub Actions run `33034944943` 成功完成测试、五 APK 构建和 Artifact 上传。
 - Artifact 名为 `EmoRepo-dev-4-38885745cf2601fd34bbc262cd03b30184eeb1a3`，包含 universal、arm64-v8a、armeabi-v7a、x86、x86_64 和 `SHA256SUMS`。
 - 五个 SHA-256 全部通过；universal APK 的应用 ID 为 `top.e404.emorepo.dev`、`versionCode=4`、`versionName=0.1.0-dev.4.3888574`、`debuggable=true`，签名证书 SHA-256 与 `version.properties` 一致。
+
+## 2026-08-27 release 验收
+
+- 标签 `v0.1.0` 指向 `35eb4ba02bea7408ed5e4d2ec3e734b818913ae3`；补发 run `33035704550` 成功完成测试、签名构建、摘要校验、索引生成和 Release 创建。
+- GitHub Release `EmoRepo 0.1.0` 不是 draft/prerelease，包含五个 APK、`SHA256SUMS` 和 `release-index.json`。
+- 独立下载后五个 SHA-256 全部通过；每个 APK 的文件大小、摘要和签名证书都与索引一致。
+- universal APK 为 `top.e404.emorepo`、`versionCode=1000`、`versionName=0.1.0`、`minSdk=24`、`targetSdk=36`；索引 tag、commit、五个 ABI 项和下载地址均正确。

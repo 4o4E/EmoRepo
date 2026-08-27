@@ -54,5 +54,5 @@
 | STORE-002 | 单文件刷新、替换和中断恢复 | `management/persistence.md` | verified | `AtomicFileStore`、`AtomicFileStoreTest` |
 | STORE-003 | 图片和多个索引之间使用可恢复事务日志 | `management/persistence.md` | confirmed | — |
 | RELEASE-001 | 普通提交构建可调试 dev 渠道并只上传 Actions Artifact | `release/ci-and-updates.md` | verified | `android-dev.yml`、`collect-apks.sh`；run `33034944943` 的五 APK Artifact、SHA-256、dev 包名/版本/调试状态和持久签名验收 |
-| RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | implemented | `android-release.yml`；本地五 APK release 签名和 actionlint 通过，GitHub Release 待验收 |
-| RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | implemented | `generate-release-index.sh`；本地 JSON 结构、五个下载项和摘要通过，Release 资产待验收 |
+| RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | verified | `android-release.yml`；`v0.1.0` run `33035704550`、五个签名 APK 和 GitHub Release 独立下载验收 |
+| RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `generate-release-index.sh`；`release-index.json` 的 tag/commit/版本/五 ABI/尺寸/SHA-256/证书/下载地址独立验收 |
