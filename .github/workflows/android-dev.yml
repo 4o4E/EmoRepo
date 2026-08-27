@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 4o4E/QAuxiliary
-          ref: 2b506520e73ff43365fcb09a5a111c79c09d5430
+          ref: f6e6aa3d3ec802a372b7e9aaa08cec2b4a509828
           path: QAuxiliary
           sparse-checkout: loader/emoticon-provider-api
 
@@ -47,7 +47,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: 安装 Android SDK 组件
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: 准备持久签名
         env:

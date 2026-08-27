@@ -20,6 +20,8 @@ EmoRepo 只发布两个渠道：
 
 CI 中两个渠道使用同一套持久签名凭据，保证同一应用 ID 的后续构建可以覆盖安装；本地没有 CI 凭据时，debug 仍使用 Android 默认调试签名，release 可以构建未签名产物用于源码检查，但不得发布。
 
+为避免 CI 和源码依赖预览 SDK，App 固定使用 `compileSdk=36`、`targetSdk=36` 和 `minSdk=24`，兼容 Android 7.0 及以上设备。Compose 固定使用 BOM `2026.06.01`（Foundation `1.11.4`），AndroidX Core 固定为 `1.17.0`；不得升级到要求 API 37/36.1 的 Compose `1.12` 或 Core `1.18+`，除非重新确认兼容基线。
+
 ## 版本
 
 - release 的 `versionName` 直接取标签去掉前导 `v` 的 SemVer，例如 `v0.1.0` 对应 `0.1.0`。
@@ -35,7 +37,7 @@ EmoRepo 使用 QAux Provider API 的 compile-only 复合构建。GitHub Actions 
 
 ```text
 repository: 4o4E/QAuxiliary
-commit: 2b506520e73ff43365fcb09a5a111c79c09d5430
+commit: f6e6aa3d3ec802a372b7e9aaa08cec2b4a509828
 ```
 
 不得在 workflow 中跟随浮动分支；升级 SPI 时先更新并验证 QAux 提交，再更新此固定值。

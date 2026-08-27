@@ -32,11 +32,7 @@ if (hasCiSigning && signingValues.any { value -> value.isNullOrBlank() }) {
 android {
     namespace = "top.e404.emorepo"
 
-    compileSdk {
-        version = release(37) {
-            minorApiLevel = 0
-        }
-    }
+    compileSdk = 36
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
@@ -103,14 +99,14 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
 
     compileOnly("io.github.qauxv:emoticon-provider-api:1.0.0")
     implementation("org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
     implementation("com.google.code.gson:gson:2.14.0")
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
-    implementation("androidx.core:core:1.19.0")
+    implementation("androidx.core:core:1.17.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
