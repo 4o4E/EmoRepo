@@ -31,7 +31,7 @@
         </provider>
         <provider
             android:name=".ipc.EmoRepoContentProvider"
-            android:authorities="top.e404.emorepo.provider"
+            android:authorities="${applicationId}.provider"
             android:exported="true"
             android:grantUriPermissions="false" />
     </application>

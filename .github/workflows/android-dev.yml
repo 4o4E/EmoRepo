@@ -1,0 +1,93 @@
+name: Android Dev
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: EmoRepo
+    steps:
+      - name: 检出 EmoRepo
+        uses: actions/checkout@v4
+        with:
+          path: EmoRepo
+          fetch-depth: 0
+
+      - name: 检出固定 QAux Provider API
+        uses: actions/checkout@v4
+        with:
+          repository: 4o4E/QAuxiliary
+          ref: 2b506520e73ff43365fcb09a5a111c79c09d5430
+          path: QAuxiliary
+          sparse-checkout: loader/emoticon-provider-api
+
+      - name: 配置 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 配置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 Android SDK 组件
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
+      - name: 准备持久签名
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$KEYSTORE_BASE64" && -n "$STORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]
+          mkdir -p "$RUNNER_TEMP/emorepo-signing"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/emorepo-signing/release.jks"
+          echo "EMOREPO_KEYSTORE_PATH=$RUNNER_TEMP/emorepo-signing/release.jks" >> "$GITHUB_ENV"
+          echo "EMOREPO_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "EMOREPO_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "EMOREPO_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: 计算 dev 版本
+        run: |
+          set -euo pipefail
+          base_version="$(sed -n 's/^baseVersion=//p' version.properties)"
+          [[ "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "VERSION_NAME=${base_version}-dev.${GITHUB_RUN_NUMBER}.${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - name: 测试并构建 dev APK
+        run: >-
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:assembleDebug
+          -Pemorepo.versionName="$VERSION_NAME"
+          -Pemorepo.versionCode="$VERSION_CODE"
+
+      - name: 整理 dev 产物
+        run: bash .github/scripts/collect-apks.sh debug "$VERSION_NAME" dist/dev
+
+      - name: 上传 dev Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmoRepo-dev-${{ github.run_number }}-${{ github.sha }}
+          path: EmoRepo/dist/dev/*
+          if-no-files-found: error
+          retention-days: 14

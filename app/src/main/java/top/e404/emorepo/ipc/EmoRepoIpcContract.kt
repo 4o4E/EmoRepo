@@ -1,7 +1,9 @@
 package top.e404.emorepo.ipc
 
+import top.e404.emorepo.BuildConfig
+
 object EmoRepoIpcContract {
-    const val AUTHORITY = "top.e404.emorepo.provider"
+    val AUTHORITY: String = "${BuildConfig.APPLICATION_ID}.provider"
     const val PATH_REVISION = "revision"
     const val PATH_PACKS = "packs"
     const val PATH_ITEMS = "items"

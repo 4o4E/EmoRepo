@@ -1,0 +1,152 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已存在的 SemVer 标签，例如 v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: EmoRepo
+    steps:
+      - name: 检出 EmoRepo 标签
+        uses: actions/checkout@v4
+        with:
+          path: EmoRepo
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: 检出固定 QAux Provider API
+        uses: actions/checkout@v4
+        with:
+          repository: 4o4E/QAuxiliary
+          ref: 2b506520e73ff43365fcb09a5a111c79c09d5430
+          path: QAuxiliary
+          sparse-checkout: loader/emoticon-provider-api
+
+      - name: 配置 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 配置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 Android SDK 组件
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
+      - name: 验证标签并计算 release 版本
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$REQUESTED_TAG"
+          if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "标签必须严格匹配 v<major>.<minor>.<patch>: $tag" >&2
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+          (( minor <= 999 && patch <= 999 )) || { echo "minor 和 patch 必须小于 1000" >&2; exit 1; }
+          version_name="${major}.${minor}.${patch}"
+          base_version="$(sed -n 's/^baseVersion=//p' version.properties)"
+          [[ "$version_name" == "$base_version" ]] || {
+            echo "标签版本 $version_name 与 version.properties 的 $base_version 不一致" >&2
+            exit 1
+          }
+          git rev-parse "refs/tags/$tag" >/dev/null
+          git merge-base --is-ancestor "$tag^{commit}" origin/main || {
+            echo "release 标签必须指向默认分支中的提交" >&2
+            exit 1
+          }
+          version_code=$(( major * 1000000 + minor * 1000 + patch ))
+          (( version_code > 0 && version_code <= 2147483647 )) || { echo "versionCode 越界" >&2; exit 1; }
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$version_code" >> "$GITHUB_ENV"
+          echo "RELEASE_COMMIT=$(git rev-parse "$tag^{commit}")" >> "$GITHUB_ENV"
+          echo "PUBLISHED_AT=$(git show -s --format=%cI "$tag^{commit}")" >> "$GITHUB_ENV"
+          echo "SIGNING_CERTIFICATE_SHA256=$(sed -n 's/^signingCertificateSha256=//p' version.properties)" >> "$GITHUB_ENV"
+
+      - name: 准备 release 签名
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$KEYSTORE_BASE64" && -n "$STORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]
+          mkdir -p "$RUNNER_TEMP/emorepo-signing"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/emorepo-signing/release.jks"
+          echo "EMOREPO_KEYSTORE_PATH=$RUNNER_TEMP/emorepo-signing/release.jks" >> "$GITHUB_ENV"
+          echo "EMOREPO_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "EMOREPO_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "EMOREPO_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: 测试并构建 release APK
+        run: >-
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:assembleRelease
+          -Pemorepo.versionName="$VERSION_NAME"
+          -Pemorepo.versionCode="$VERSION_CODE"
+
+      - name: 整理 release 产物
+        run: |
+          set -euo pipefail
+          bash .github/scripts/collect-apks.sh release "$VERSION_NAME" dist/release
+
+      - name: 校验 APK 签名
+        run: |
+          set -euo pipefail
+          for apk in dist/release/*.apk; do
+            cert_digest="$(apksigner verify --verbose --print-certs "$apk" \
+              | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2}')"
+            [[ "$cert_digest" == "$SIGNING_CERTIFICATE_SHA256" ]] || {
+              echo "$apk 的签名证书不匹配: $cert_digest" >&2
+              exit 1
+            }
+          done
+
+      - name: 生成 release 更新索引
+        run: >-
+          bash .github/scripts/generate-release-index.sh
+          "$VERSION_NAME" "$VERSION_CODE" "$TAG" "$RELEASE_COMMIT" "$PUBLISHED_AT"
+          "$GITHUB_REPOSITORY" "$SIGNING_CERTIFICATE_SHA256" dist/release
+
+      - name: 创建或更新 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/release/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/release/* \
+              --verify-tag \
+              --generate-notes \
+              --title "EmoRepo $VERSION_NAME" \
+              --repo "$GITHUB_REPOSITORY"
+          fi

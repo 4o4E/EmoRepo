@@ -17,7 +17,8 @@
 11. [`ui/app.md`](ui/app.md)：App 页面和状态。
 12. [`management/emoticons.md`](management/emoticons.md)：表情管理操作。
 13. [`management/persistence.md`](management/persistence.md)：管理写入和中断恢复。
-14. [`traceability.md`](traceability.md)：确认和实现状态。
+14. [`release/ci-and-updates.md`](release/ci-and-updates.md)：CI 渠道、签名、标签发布和更新索引。
+15. [`traceability.md`](traceability.md)：确认和实现状态。
 
 ## 状态
 

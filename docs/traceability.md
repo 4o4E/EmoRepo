@@ -1,6 +1,6 @@
 # 需求追踪
 
-- 更新：2026-08-26
+- 更新：2026-08-27
 
 状态含义见 [`README.md`](README.md)。代码列为空表示尚未实现。
 
@@ -53,3 +53,6 @@
 | IMAGE-001 | 缩略图使用插值过滤，禁止最近邻缩放 | `management/emoticons.md` | verified | `FilteredThumbnail` |
 | STORE-002 | 单文件刷新、替换和中断恢复 | `management/persistence.md` | verified | `AtomicFileStore`、`AtomicFileStoreTest` |
 | STORE-003 | 图片和多个索引之间使用可恢复事务日志 | `management/persistence.md` | confirmed | — |
+| RELEASE-001 | 普通提交构建可调试 dev 渠道并只上传 Actions Artifact | `release/ci-and-updates.md` | implemented | `android-dev.yml`、`collect-apks.sh`；本地五 ABI/universal debug 构建通过，Actions 待验收 |
+| RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | implemented | `android-release.yml`；本地五 APK release 签名和 actionlint 通过，GitHub Release 待验收 |
+| RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | implemented | `generate-release-index.sh`；本地 JSON 结构、五个下载项和摘要通过，Release 资产待验收 |
