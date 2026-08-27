@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           for apk in dist/release/*.apk; do
-            cert_digest="$(apksigner verify --verbose --print-certs "$apk" \
+            cert_digest="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" \
               | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2}')"
             [[ "$cert_digest" == "$SIGNING_CERTIFICATE_SHA256" ]] || {
               echo "$apk 的签名证书不匹配: $cert_digest" >&2
