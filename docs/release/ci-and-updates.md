@@ -1,6 +1,6 @@
 # CI、发布与更新索引
 
-- 状态：`confirmed`
+- 状态：`implemented`
 - 更新：2026-08-27
 
 ## 构建渠道
@@ -98,3 +98,9 @@ https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 - `android-release.yml`：仅 `v*` 标签和手动补发；验证 SemVer、运行 JVM 测试、构建签名 release APK、生成 `release-index.json` 与 `SHA256SUMS`，再创建或覆盖同标签 Release 资产。
 - Release workflow 使用 `contents: write`；dev workflow 只使用 `contents: read`。
 - 普通提交和失败的标签构建都不得创建 GitHub Release。
+
+## 2026-08-27 dev 验收
+
+- GitHub Actions run `33034944943` 成功完成测试、五 APK 构建和 Artifact 上传。
+- Artifact 名为 `EmoRepo-dev-4-38885745cf2601fd34bbc262cd03b30184eeb1a3`，包含 universal、arm64-v8a、armeabi-v7a、x86、x86_64 和 `SHA256SUMS`。
+- 五个 SHA-256 全部通过；universal APK 的应用 ID 为 `top.e404.emorepo.dev`、`versionCode=4`、`versionName=0.1.0-dev.4.3888574`、`debuggable=true`，签名证书 SHA-256 与 `version.properties` 一致。
