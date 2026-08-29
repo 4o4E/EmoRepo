@@ -1381,10 +1381,8 @@ internal class EmoRepoPanelDialog private constructor(
                 key.revision == snapshot.revision &&
                     key.packId == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID
             }?.value ?: return@synchronized
-            val updatedItems = (listOf(item) + cachedRecent.filterNot { recent ->
+            val updatedItems = listOf(item) + cachedRecent.filterNot { recent ->
                 recent.packId == item.packId && recent.id == item.id
-            }).mapIndexed { index, recent ->
-                recent.copy(order = (index + 1L) * RECENT_ORDER_STEP)
             }
             val updatedPack = recentPack.copy(
                 coverPackId = item.packId,
@@ -1402,7 +1400,6 @@ internal class EmoRepoPanelDialog private constructor(
         }
 
         private const val DEFAULT_PANEL_COLUMNS = 4
-        private const val RECENT_ORDER_STEP = 1024L
         private const val COLLAPSED_HEIGHT_RATIO = 0.72f
         private const val EXPANDED_HEIGHT_RATIO = 0.92f
         private const val PACK_TAB_WIDTH_DP = 60

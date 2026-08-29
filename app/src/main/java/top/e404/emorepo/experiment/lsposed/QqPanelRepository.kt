@@ -40,7 +40,6 @@ internal object QqPanelRepository {
             val cover = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COVER_ITEM_ID)
             val coverPack = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COVER_PACK_ID)
             val count = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_ITEM_COUNT)
-            val order = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_ORDER)
             val writable = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_WRITABLE)
             buildList {
                 while (cursor.moveToNext()) {
@@ -51,12 +50,11 @@ internal object QqPanelRepository {
                             coverItemId = cursor.getString(cover),
                             coverPackId = cursor.getString(coverPack),
                             itemCount = cursor.getInt(count),
-                            order = cursor.getLong(order),
                             writable = cursor.getInt(writable) != 0,
                         ),
                     )
                 }
-            }.sortedBy(PanelPack::order)
+            }
         }
     }
 
@@ -74,7 +72,6 @@ internal object QqPanelRepository {
                 val fileName = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_FILE_NAME)
                 val mimeType = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_MIME_TYPE)
                 val animated = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_ANIMATED)
-                val order = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_ORDER)
                 val sourcePack = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_SOURCE_PACK_ID)
                 buildList {
                     while (cursor.moveToNext()) {
@@ -84,7 +81,6 @@ internal object QqPanelRepository {
                                 fileName = cursor.getString(fileName),
                                 mimeType = cursor.getString(mimeType),
                                 animated = cursor.getInt(animated) != 0,
-                                order = cursor.getLong(order),
                                 packId = cursor.getString(sourcePack),
                             ),
                         )
@@ -95,7 +91,7 @@ internal object QqPanelRepository {
             result += page
             offset += page.size
         }
-        return result.sortedBy(PanelItem::order)
+        return result
     }
 
     fun itemUri(packId: String, itemId: String): Uri =
@@ -159,7 +155,6 @@ internal data class PanelPack(
     val coverItemId: String?,
     val coverPackId: String?,
     val itemCount: Int,
-    val order: Long,
     val writable: Boolean,
 )
 
@@ -168,7 +163,6 @@ internal data class PanelItem(
     val fileName: String,
     val mimeType: String,
     val animated: Boolean,
-    val order: Long,
     val packId: String,
 )
 

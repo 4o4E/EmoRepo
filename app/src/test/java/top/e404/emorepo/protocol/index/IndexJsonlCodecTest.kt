@@ -14,7 +14,6 @@ class IndexJsonlCodecTest {
         ext = "png",
         time = 100,
         icon = true,
-        order = 1024,
     )
 
     @Test
@@ -22,7 +21,7 @@ class IndexJsonlCodecTest {
         val encoded = IndexJsonlCodec.encode(listOf(first))
 
         assertEquals(
-            "{\"name\":\"cat.png\",\"md5\":\"11111111111111111111111111111111\",\"ext\":\"png\",\"time\":100,\"icon\":true,\"order\":1024}\n",
+            "{\"name\":\"cat.png\",\"md5\":\"11111111111111111111111111111111\",\"ext\":\"png\",\"time\":100,\"icon\":true}\n",
             encoded,
         )
         assertEquals(listOf(first), IndexJsonlCodec.decode(encoded))
@@ -44,14 +43,14 @@ class IndexJsonlCodecTest {
 
     @Test
     fun unknownFieldRejectsWholeDocument() {
-        val content = """{"name":"cat.png","md5":"11111111111111111111111111111111","ext":"png","time":100,"order":1024,"extra":1}"""
+        val content = """{"name":"cat.png","md5":"11111111111111111111111111111111","ext":"png","time":100,"extra":1}"""
 
         assertThrows(ProtocolException::class.java) { IndexJsonlCodec.decode(content) }
     }
 
     @Test
     fun duplicateMd5IsRejected() {
-        val second = first.copy(name = "other.png", order = 2048, icon = false)
+        val second = first.copy(name = "other.png", icon = false)
 
         val error = assertThrows(ProtocolException::class.java) {
             IndexJsonlCodec.encode(listOf(first, second))
@@ -64,7 +63,6 @@ class IndexJsonlCodecTest {
         val second = first.copy(
             name = "other.png",
             md5 = "22222222222222222222222222222222",
-            order = 2048,
         )
 
         assertThrows(ProtocolException::class.java) {
@@ -74,7 +72,7 @@ class IndexJsonlCodecTest {
 
     @Test
     fun fractionalIntegerIsRejected() {
-        val content = """{"name":"cat.png","md5":"11111111111111111111111111111111","ext":"png","time":1.5,"order":1024}"""
+        val content = """{"name":"cat.png","md5":"11111111111111111111111111111111","ext":"png","time":1.5}"""
 
         assertThrows(ProtocolException::class.java) { IndexJsonlCodec.decode(content) }
     }

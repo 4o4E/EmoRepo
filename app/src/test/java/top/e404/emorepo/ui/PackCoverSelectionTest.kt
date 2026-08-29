@@ -6,11 +6,11 @@ import org.junit.Test
 import top.e404.emorepo.protocol.index.EmoticonRecord
 
 class PackCoverSelectionTest {
-    private val first = record("a", order = 1024)
-    private val explicit = record("b", order = 2048, icon = true)
+    private val first = record("a")
+    private val explicit = record("b", icon = true)
 
     @Test
-    fun `uses available explicit cover before order`() {
+    fun `uses available explicit cover before line order`() {
         assertEquals(explicit, selectPackCover(listOf(first, explicit)) { true })
     }
 
@@ -25,12 +25,11 @@ class PackCoverSelectionTest {
         assertNull(selectPackCover(listOf(first, explicit)) { false })
     }
 
-    private fun record(md5: String, order: Long, icon: Boolean = false) = EmoticonRecord(
+    private fun record(md5: String, icon: Boolean = false) = EmoticonRecord(
         name = "$md5.png",
         md5 = md5.padEnd(32, '0'),
         ext = "png",
         time = 1,
         icon = icon,
-        order = order,
     )
 }

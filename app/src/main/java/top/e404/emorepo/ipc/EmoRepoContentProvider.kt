@@ -317,12 +317,11 @@ class EmoRepoContentProvider : ContentProvider() {
                 recentItems.firstOrNull()?.record?.md5,
                 recentItems.firstOrNull()?.packId,
                 recentItems.size,
-                Long.MIN_VALUE,
                 0,
             ),
         )
         packs.forEach { pack ->
-            val records = pack.records.sortedBy { it.order }
+            val records = pack.records
             addRow(
                 arrayOf<Any?>(
                     pack.name,
@@ -330,7 +329,6 @@ class EmoRepoContentProvider : ContentProvider() {
                     records.firstOrNull { it.icon }?.md5 ?: records.firstOrNull()?.md5,
                     pack.name,
                     records.size,
-                    pack.order,
                     1,
                 ),
             )
@@ -346,12 +344,12 @@ class EmoRepoContentProvider : ContentProvider() {
         require(limit in 1..EmoRepoIpcContract.MAXIMUM_PAGE_SIZE) { "limit 必须为 1..200" }
         return MatrixCursor(ITEM_COLUMNS).apply {
             val items = if (packId == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID) {
-                resolveRecentItems(repository.listPacks()).mapIndexed { index, item ->
-                    ProviderItem(item.packId, item.record, (index + 1L) * RECENT_ORDER_STEP)
+                resolveRecentItems(repository.listPacks()).map { item ->
+                    ProviderItem(item.packId, item.record)
                 }
             } else {
-                repository.getPack(packId).records.sortedBy { it.order }.map { record ->
-                    ProviderItem(packId, record, record.order)
+                repository.getPack(packId).records.map { record ->
+                    ProviderItem(packId, record)
                 }
             }
             items.drop(offset).take(limit).forEach { item ->
@@ -363,7 +361,6 @@ class EmoRepoContentProvider : ContentProvider() {
                         record.name,
                         mimeType(record.ext),
                         if (isAnimated(file, record.ext)) 1 else 0,
-                        item.order,
                         item.packId,
                     ),
                 )
@@ -420,7 +417,6 @@ class EmoRepoContentProvider : ContentProvider() {
     private data class ProviderItem(
         val packId: String,
         val record: EmoticonRecord,
-        val order: Long,
     )
 
     private companion object {
@@ -430,7 +426,6 @@ class EmoRepoContentProvider : ContentProvider() {
         const val MATCH_ITEMS = 4
         const val MATCH_ITEM = 5
         const val WEBP_ANIMATION_SCAN_BYTES = 64 * 1024
-        const val RECENT_ORDER_STEP = 1024L
         const val QQ_LOCATOR_CACHE_PREFERENCES = "qq_locator_cache"
         const val CACHE_SCHEMA_VERSION = "schema_version"
         const val CACHE_HOST_VERSION = "host_version"
@@ -455,7 +450,6 @@ class EmoRepoContentProvider : ContentProvider() {
             EmoRepoIpcContract.COLUMN_COVER_ITEM_ID,
             EmoRepoIpcContract.COLUMN_COVER_PACK_ID,
             EmoRepoIpcContract.COLUMN_ITEM_COUNT,
-            EmoRepoIpcContract.COLUMN_ORDER,
             EmoRepoIpcContract.COLUMN_WRITABLE,
         )
         val ITEM_COLUMNS = arrayOf(
@@ -463,7 +457,6 @@ class EmoRepoContentProvider : ContentProvider() {
             EmoRepoIpcContract.COLUMN_FILE_NAME,
             EmoRepoIpcContract.COLUMN_MIME_TYPE,
             EmoRepoIpcContract.COLUMN_ANIMATED,
-            EmoRepoIpcContract.COLUMN_ORDER,
             EmoRepoIpcContract.COLUMN_SOURCE_PACK_ID,
         )
         val URI_MATCHER = UriMatcher(UriMatcher.NO_MATCH).apply {

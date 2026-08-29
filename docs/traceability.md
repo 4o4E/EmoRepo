@@ -1,6 +1,6 @@
 # 需求追踪
 
-- 更新：2026-08-29
+- 更新：2026-08-30
 
 状态含义见 [`README.md`](README.md)。代码列为空表示尚未实现。
 
@@ -18,7 +18,7 @@
 | HOOK-003 | QQ 图片消息单图和多图经目标选择、二次确认和带 rkey 的原图读取后批量导入 EmoRepo | `architecture/qq-panel.md` | implemented | `EmoRepoMessageMenuHook`、`QqRkeyStore`、`import_items` IPC、`BoundedImportReaderTest`；虚拟包过滤、50 张/64 MiB 单文件/256 MiB 批次边界和逐项读取已实现，实际多图和未缓存 `/download` rkey 下载待验收 |
 | DATA-001 | 保持当前表情目录语义 | `protocol/repository.md` | confirmed | — |
 | DATA-002 | `index.jsonl` 严格编解码和记录校验 | `protocol/index-jsonl.md` | verified | `IndexJsonlCodec`、`IndexJsonlCodecTest` |
-| DATA-003 | `order` 是唯一最终显示顺序 | `protocol/index-jsonl.md` | confirmed | — |
+| DATA-003 | 根索引和包内索引都以 JSONL 行序作为唯一最终顺序，不保存 `order` | `protocol/index-jsonl.md`、`protocol/root-index-jsonl.md` | verified | `IndexJsonlCodec`、`RootIndexJsonlCodec`、`LegacyOrderMigration`、`EmoticonRepository`；JVM 测试、`face` 31 文件迁移核对及 App/QQ 真机顺序验收 |
 | DATA-004 | 最近使用 CSV 编解码、去重和稳定排序 | `protocol/recent-csv.md` | verified | `RecentCsvCodec`、`RecentCsvCodecTest` |
 | DATA-005 | 不兼容旧 `index.json` | `scope.md` | confirmed | — |
 | DATA-006 | 最近使用按设备文件保存、改名和限制数量 | `protocol/recent-csv.md` | verified | `RecentUsageRepository`、`RecentUsageRepositoryTest` |

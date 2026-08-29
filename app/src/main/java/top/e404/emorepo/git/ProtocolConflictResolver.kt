@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets
 import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.protocol.index.IndexJsonlCodec
-import top.e404.emorepo.protocol.pack.PackOrderRecord
+import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 import top.e404.emorepo.protocol.recent.RecentCsvCodec
 
@@ -34,33 +34,34 @@ object ProtocolConflictResolver {
         localBytes: ByteArray?,
         remoteBytes: ByteArray?,
     ): ConflictResolution {
-        val base = decodeRootIndex(baseBytes).associateBy { it.name }
-        val local = decodeRootIndex(localBytes).associateBy { it.name }
-        val remote = decodeRootIndex(remoteBytes).associateBy { it.name }
+        val baseRecords = decodeRootIndex(baseBytes)
+        val localRecords = decodeRootIndex(localBytes)
+        val remoteRecords = decodeRootIndex(remoteBytes)
+        val base = baseRecords.associateBy { it.name }
+        val local = localRecords.associateBy { it.name }
+        val remote = remoteRecords.associateBy { it.name }
         val warnings = mutableListOf<String>()
-        val merged = (base.keys + local.keys + remote.keys).mapNotNull { name ->
-            mergePackOrderRecord(
+        val mergedByName = (base.keys + local.keys + remote.keys).mapNotNull { name ->
+            mergePackIndexRecord(
                 base = base[name],
                 local = local[name],
                 remote = remote[name],
-                onDeleteModify = { warnings += "$path: $name 删除与顺序修改冲突，保留修改并等待目录校验" },
-            )
-        }
-        val normalized = merged
-            .sortedWith(compareBy<PackOrderRecord> { it.order }.thenBy { it.name })
-            .mapIndexed { index, record -> record.copy(order = (index + 1L) * ORDER_STEP) }
+                onDeleteModify = { warnings += "$path: $name 删除与修改冲突，保留仍存在记录并等待目录校验" },
+            )?.let { name to it }
+        }.toMap()
+        val merged = mergeSequence(localRecords, remoteRecords, mergedByName, PackIndexRecord::name)
         return ConflictResolution(
-            RootIndexJsonlCodec.encode(normalized).toByteArray(StandardCharsets.UTF_8),
+            RootIndexJsonlCodec.encode(merged).toByteArray(StandardCharsets.UTF_8),
             warnings,
         )
     }
 
-    private fun mergePackOrderRecord(
-        base: PackOrderRecord?,
-        local: PackOrderRecord?,
-        remote: PackOrderRecord?,
+    private fun mergePackIndexRecord(
+        base: PackIndexRecord?,
+        local: PackIndexRecord?,
+        remote: PackIndexRecord?,
         onDeleteModify: () -> Unit,
-    ): PackOrderRecord? {
+    ): PackIndexRecord? {
         if (local == null && remote == null) return null
         if (local == null) {
             if (remote == base) return null
@@ -84,32 +85,27 @@ object ProtocolConflictResolver {
         localBytes: ByteArray?,
         remoteBytes: ByteArray?,
     ): ConflictResolution {
-        val base = decodeIndex(baseBytes).associateBy { it.md5 }
-        val local = decodeIndex(localBytes).associateBy { it.md5 }
-        val remote = decodeIndex(remoteBytes).associateBy { it.md5 }
+        val baseRecords = decodeIndex(baseBytes)
+        val localRecords = decodeIndex(localBytes)
+        val remoteRecords = decodeIndex(remoteBytes)
+        val base = baseRecords.associateBy { it.md5 }
+        val local = localRecords.associateBy { it.md5 }
+        val remote = remoteRecords.associateBy { it.md5 }
         val warnings = mutableListOf<String>()
-        val merged = (base.keys + local.keys + remote.keys).mapNotNull { md5 ->
+        val mergedByMd5 = (base.keys + local.keys + remote.keys).mapNotNull { md5 ->
             mergeRecord(
                 base = base[md5],
                 local = local[md5],
                 remote = remote[md5],
                 onDeleteModify = { warnings += "$path: $md5 删除与修改冲突，保留修改" },
-            )
-        }
-        val localIconChanges = merged.filter { record ->
+            )?.let { md5 to it }
+        }.toMap()
+        val ordered = mergeSequence(localRecords, remoteRecords, mergedByMd5, EmoticonRecord::md5)
+        val localIconChanges = ordered.filter { record ->
             record.icon && local[record.md5]?.icon == true && base[record.md5]?.icon != true
         }
-        val chosenIcon = (localIconChanges.ifEmpty { merged.filter { it.icon } })
-            .minWithOrNull(compareBy<EmoticonRecord> { it.order }.thenBy { it.md5 })
-            ?.md5
-        val normalized = merged
-            .sortedWith(compareBy<EmoticonRecord> { it.order }.thenBy { it.md5 })
-            .mapIndexed { index, record ->
-                record.copy(
-                    icon = record.md5 == chosenIcon,
-                    order = (index + 1L) * ORDER_STEP,
-                )
-            }
+        val chosenIcon = (localIconChanges.ifEmpty { ordered.filter { it.icon } }).firstOrNull()?.md5
+        val normalized = ordered.map { record -> record.copy(icon = record.md5 == chosenIcon) }
         return ConflictResolution(
             content = IndexJsonlCodec.encode(normalized).toByteArray(StandardCharsets.UTF_8),
             warnings = warnings,
@@ -142,8 +138,30 @@ object ProtocolConflictResolver {
             ext = chooseField(base?.ext, local.ext, remote.ext),
             time = maxOf(local.time, remote.time),
             icon = chooseField(base?.icon, local.icon, remote.icon),
-            order = local.order,
         )
+    }
+
+    /** 本地行序为基线，远端独立新增按远端相邻锚点插入。 */
+    private fun <K, T> mergeSequence(
+        local: List<T>,
+        remote: List<T>,
+        mergedByKey: Map<K, T>,
+        keyOf: (T) -> K,
+    ): List<T> {
+        val result = local.map(keyOf).filter(mergedByKey::containsKey).distinct().toMutableList()
+        val remoteKeys = remote.map(keyOf).filter(mergedByKey::containsKey).distinct()
+        remoteKeys.forEachIndexed { index, key ->
+            if (key in result) return@forEachIndexed
+            val previous = remoteKeys.take(index).lastOrNull { candidate -> candidate in result }
+            val next = remoteKeys.drop(index + 1).firstOrNull { candidate -> candidate in result }
+            when {
+                previous != null -> result.add(result.indexOf(previous) + 1, key)
+                next != null -> result.add(result.indexOf(next), key)
+                else -> result += key
+            }
+        }
+        mergedByKey.keys.filterNot(result::contains).forEach(result::add)
+        return result.map(mergedByKey::getValue)
     }
 
     private fun <T> chooseField(base: T?, local: T, remote: T): T = when {
@@ -183,7 +201,7 @@ object ProtocolConflictResolver {
         if (bytes == null) emptyList()
         else IndexJsonlCodec.decode(String(bytes, StandardCharsets.UTF_8))
 
-    private fun decodeRootIndex(bytes: ByteArray?): List<PackOrderRecord> =
+    private fun decodeRootIndex(bytes: ByteArray?): List<PackIndexRecord> =
         if (bytes == null) emptyList()
         else RootIndexJsonlCodec.decode(String(bytes, StandardCharsets.UTF_8))
 
@@ -196,6 +214,4 @@ object ProtocolConflictResolver {
         other == null -> false
         else -> contentEquals(other)
     }
-
-    private const val ORDER_STEP = 1_024L
 }

@@ -8,7 +8,7 @@ import org.junit.Test
 import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.protocol.index.IndexJsonlCodec
-import top.e404.emorepo.protocol.pack.PackOrderRecord
+import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 import top.e404.emorepo.protocol.recent.RecentCsvCodec
 import top.e404.emorepo.protocol.recent.RecentUsageRecord
@@ -16,14 +16,14 @@ import top.e404.emorepo.protocol.recent.RecentUsageRecord
 class ProtocolConflictResolverTest {
     @Test
     fun `root index merges additions and uses local order`() {
-        val base = listOf(PackOrderRecord("base", 1_024))
+        val base = listOf(PackIndexRecord("base"))
         val local = listOf(
-            PackOrderRecord("base", 2_048),
-            PackOrderRecord("local", 1_024),
+            PackIndexRecord("local"),
+            PackIndexRecord("base"),
         )
         val remote = listOf(
-            PackOrderRecord("base", 1_024),
-            PackOrderRecord("remote", 3_072),
+            PackIndexRecord("base"),
+            PackIndexRecord("remote"),
         )
 
         val result = ProtocolConflictResolver.resolve(
@@ -35,24 +35,22 @@ class ProtocolConflictResolverTest {
         val merged = RootIndexJsonlCodec.decode(result.text())
 
         assertEquals(listOf("local", "base", "remote"), merged.map { it.name })
-        assertEquals(listOf(1_024L, 2_048L, 3_072L), merged.map { it.order })
     }
 
     @Test
-    fun `merges different additions and normalizes order`() {
-        val local = listOf(record("a", 10, 9_000))
-        val remote = listOf(record("b", 20, 100))
+    fun `merges different additions with local line order first`() {
+        val local = listOf(record("a", 10))
+        val remote = listOf(record("b", 20))
 
         val merged = resolveIndex(emptyList(), local, remote)
 
-        assertEquals(listOf("b", "a"), merged.map { it.md5.first().toString() })
-        assertEquals(listOf(1_024L, 2_048L), merged.map { it.order })
+        assertEquals(listOf("a", "b"), merged.map { it.md5.first().toString() })
     }
 
     @Test
     fun `keeps modification when the other side deletes`() {
-        val base = listOf(record("a", 10, 1_024))
-        val remote = listOf(record("a", 30, 1_024))
+        val base = listOf(record("a", 10))
+        val remote = listOf(record("a", 30))
 
         val resolution = ProtocolConflictResolver.resolve(
             path = "pack/index.jsonl",
@@ -67,9 +65,9 @@ class ProtocolConflictResolverTest {
 
     @Test
     fun `uses local order and larger time for concurrent changes`() {
-        val base = listOf(record("a", 10, 1_024), record("b", 10, 2_048))
-        val local = listOf(record("a", 10, 2_048), record("b", 10, 1_024))
-        val remote = listOf(record("a", 40, 1_024), record("b", 30, 2_048))
+        val base = listOf(record("a", 10), record("b", 10))
+        val local = listOf(record("b", 10), record("a", 10))
+        val remote = listOf(record("a", 40), record("b", 30))
 
         val merged = resolveIndex(base, local, remote)
 
@@ -124,12 +122,11 @@ class ProtocolConflictResolverTest {
         return IndexJsonlCodec.decode(result.text())
     }
 
-    private fun record(id: String, time: Long, order: Long) = EmoticonRecord(
+    private fun record(id: String, time: Long) = EmoticonRecord(
         name = id.repeat(32) + ".png",
         md5 = id.repeat(32),
         ext = "png",
         time = time,
-        order = order,
     )
 
     private fun encodeIndex(records: List<EmoticonRecord>): ByteArray =

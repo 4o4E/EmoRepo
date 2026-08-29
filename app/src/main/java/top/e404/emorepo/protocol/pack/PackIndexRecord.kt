@@ -1,6 +1,5 @@
 package top.e404.emorepo.protocol.pack
 
-data class PackOrderRecord(
+data class PackIndexRecord(
     val name: String,
-    val order: Long,
 )

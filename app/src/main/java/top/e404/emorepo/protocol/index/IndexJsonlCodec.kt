@@ -16,7 +16,7 @@ import top.e404.emorepo.protocol.ProtocolNames
 object IndexJsonlCodec {
     val supportedExtensions: Set<String> = setOf("png", "jpg", "jpeg", "gif", "webp")
 
-    private val fieldNames = setOf("name", "md5", "ext", "time", "icon", "order")
+    private val fieldNames = setOf("name", "md5", "ext", "time", "icon")
     private val md5Pattern = Regex("[0-9a-f]{32}")
     private val integerPattern = Regex("-?(?:0|[1-9][0-9]*)")
     private val gson: Gson = GsonBuilder()
@@ -74,7 +74,6 @@ object IndexJsonlCodec {
             ext = objectValue.requireString("ext", lineNumber),
             time = objectValue.requireLong("time", lineNumber),
             icon = objectValue.optionalBoolean("icon", lineNumber),
-            order = objectValue.requireLong("order", lineNumber),
         )
         validateRecord(record, "index.jsonl line $lineNumber")
         return record
@@ -107,9 +106,6 @@ object IndexJsonlCodec {
         if (record.time < 0) {
             throw ProtocolException("$location time must not be negative")
         }
-        if (record.order <= 0) {
-            throw ProtocolException("$location order must be positive")
-        }
     }
 
     private fun EmoticonRecord.toJsonObject(): JsonObject = JsonObject().apply {
@@ -118,7 +114,6 @@ object IndexJsonlCodec {
         addProperty("ext", ext)
         addProperty("time", time)
         if (icon) addProperty("icon", true)
-        addProperty("order", order)
     }
 
     private fun JsonObject.requireString(name: String, lineNumber: Int): String {

@@ -71,7 +71,7 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
     var moveDialog by rememberSaveable(packName) { mutableStateOf(false) }
     var pendingImport by remember { mutableStateOf<PendingImport?>(null) }
     val orderedRecords = remember(pack.records) {
-        pack.records.sortedWith(compareBy<EmoticonRecord> { it.order }.thenBy { it.md5 })
+        pack.records
     }
     var previewPage by remember { mutableStateOf<Int?>(null) }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -111,7 +111,7 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
             val md5 = selected.singleOrNull() ?: return@PackManager
             state.manage(
                 operation = {
-                    val order = pack.records.sortedBy { it.order }.map { it.md5 }.toMutableList()
+                    val order = pack.records.map { it.md5 }.toMutableList()
                     val oldIndex = order.indexOf(md5)
                     val newIndex = (oldIndex + offset).coerceIn(0, order.lastIndex)
                     if (oldIndex != newIndex) {
@@ -200,7 +200,7 @@ private fun PackManager(
     onMoveOrder: (Int) -> Unit,
 ) {
     val ordered = remember(pack.records) {
-        pack.records.sortedWith(compareBy<EmoticonRecord> { it.order }.thenBy { it.md5 })
+        pack.records
     }
     val orderedIds = remember(ordered) { ordered.map { it.md5 } }
     val bounds = remember(pack.name) { mutableStateMapOf<String, Rect>() }

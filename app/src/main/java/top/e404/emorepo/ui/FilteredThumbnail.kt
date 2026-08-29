@@ -49,7 +49,7 @@ internal suspend fun preloadPackPreviews(
     limit: Int = 32,
 ) = coroutineScope {
     val cacheDirectory = File(context.cacheDir, THUMBNAIL_CACHE_DIRECTORY)
-    pack.records.sortedWith(compareBy<EmoticonRecord> { it.order }.thenBy { it.md5 })
+    pack.records
         .take(limit)
         .map { record ->
             async(Dispatchers.IO) {

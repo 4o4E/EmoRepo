@@ -2,7 +2,6 @@ package top.e404.emorepo.protocol.pack
 
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
-import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.Strictness
@@ -13,14 +12,13 @@ import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.ProtocolNames
 
 object RootIndexJsonlCodec {
-    private val fieldNames = setOf("name", "order")
-    private val integerPattern = Regex("-?(?:0|[1-9][0-9]*)")
+    private val fieldNames = setOf("name")
     private val gson: Gson = GsonBuilder()
         .disableHtmlEscaping()
         .setStrictness(Strictness.STRICT)
         .create()
 
-    fun decode(content: String): List<PackOrderRecord> {
+    fun decode(content: String): List<PackIndexRecord> {
         val records = content.lineSequence()
             .mapIndexedNotNull { index, rawLine ->
                 val line = rawLine.removeSuffix("\r")
@@ -31,18 +29,17 @@ object RootIndexJsonlCodec {
         return records
     }
 
-    fun encode(records: List<PackOrderRecord>): String {
+    fun encode(records: List<PackIndexRecord>): String {
         validateDocument(records)
         if (records.isEmpty()) return ""
         return records.joinToString(separator = "\n", postfix = "\n") { record ->
             gson.toJson(JsonObject().apply {
                 addProperty("name", record.name)
-                addProperty("order", record.order)
             })
         }
     }
 
-    private fun decodeLine(line: String, lineNumber: Int): PackOrderRecord {
+    private fun decodeLine(line: String, lineNumber: Int): PackIndexRecord {
         val element = try {
             val reader = JsonReader(StringReader(line)).apply { strictness = Strictness.STRICT }
             val parsed = JsonParser.parseReader(reader)
@@ -65,13 +62,12 @@ object RootIndexJsonlCodec {
                 "root index.jsonl line $lineNumber has unknown fields: ${unknownFields.sorted().joinToString()}",
             )
         }
-        return PackOrderRecord(
+        return PackIndexRecord(
             name = value.requireString("name", lineNumber),
-            order = value.requireLong("order", lineNumber),
         ).also { validateRecord(it, "root index.jsonl line $lineNumber") }
     }
 
-    private fun validateDocument(records: List<PackOrderRecord>) {
+    private fun validateDocument(records: List<PackIndexRecord>) {
         records.forEachIndexed { index, record -> validateRecord(record, "record ${index + 1}") }
         val duplicateName = records.groupBy { it.name }.entries.firstOrNull { it.value.size > 1 }?.key
         if (duplicateName != null) {
@@ -79,13 +75,10 @@ object RootIndexJsonlCodec {
         }
     }
 
-    private fun validateRecord(record: PackOrderRecord, location: String) {
+    private fun validateRecord(record: PackIndexRecord, location: String) {
         ProtocolNames.requireSafeSegment(record.name, "$location name")
         if (record.name == "recent" || record.name == ".git" || record.name.startsWith(".")) {
             throw ProtocolException("$location name is reserved: ${record.name}")
-        }
-        if (record.order <= 0) {
-            throw ProtocolException("$location order must be positive")
         }
     }
 
@@ -98,19 +91,4 @@ object RootIndexJsonlCodec {
         return value.asString
     }
 
-    private fun JsonObject.requireLong(name: String, lineNumber: Int): Long {
-        val value = get(name)
-            ?: throw ProtocolException("root index.jsonl line $lineNumber is missing $name")
-        if (!value.isNumberPrimitive() || !integerPattern.matches(value.asString)) {
-            throw ProtocolException("root index.jsonl line $lineNumber $name must be an integer")
-        }
-        return try {
-            value.asString.toLong()
-        } catch (error: NumberFormatException) {
-            throw ProtocolException("root index.jsonl line $lineNumber $name is outside int64 range", error)
-        }
-    }
-
-    private fun JsonElement.isNumberPrimitive(): Boolean =
-        isJsonPrimitive && asJsonPrimitive.isNumber
 }

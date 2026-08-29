@@ -11,7 +11,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import top.e404.emorepo.protocol.ProtocolException
-import top.e404.emorepo.protocol.pack.PackOrderRecord
+import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 
 class EmoticonRepositoryTest {
@@ -27,7 +27,6 @@ class EmoticonRepositoryTest {
         val packs = repository.listPacks()
 
         assertEquals(listOf("alpha", "zeta"), packs.map { it.name })
-        assertEquals(listOf(1_024L, 2_048L), packs.map { it.order })
         assertFalse(File(temporaryFolder.root, "repository/index.jsonl").exists())
     }
 
@@ -38,14 +37,14 @@ class EmoticonRepositoryTest {
         val rootIndex = File(temporaryFolder.root, "repository/index.jsonl")
         rootIndex.writeText(
             RootIndexJsonlCodec.encode(
-                listOf(PackOrderRecord("zeta", 1_024), PackOrderRecord("alpha", 2_048)),
+                listOf(PackIndexRecord("zeta"), PackIndexRecord("alpha")),
             ),
         )
         val repository = repository()
 
         assertEquals(listOf("zeta", "alpha"), repository.listPacks().map { it.name })
 
-        rootIndex.writeText(RootIndexJsonlCodec.encode(listOf(PackOrderRecord("alpha", 1_024))))
+        rootIndex.writeText(RootIndexJsonlCodec.encode(listOf(PackIndexRecord("alpha"))))
         assertThrows(ProtocolException::class.java) { repository.listPacks() }
     }
 
@@ -60,7 +59,7 @@ class EmoticonRepositoryTest {
 
         assertEquals(listOf("zeta", "alpha"), reordered.map { it.name })
         assertEquals(
-            listOf(PackOrderRecord("zeta", 1_024), PackOrderRecord("alpha", 2_048)),
+            listOf(PackIndexRecord("zeta"), PackIndexRecord("alpha")),
             RootIndexJsonlCodec.decode(
                 File(temporaryFolder.root, "repository/index.jsonl").readText(),
             ),
@@ -79,7 +78,6 @@ class EmoticonRepositoryTest {
         assertEquals(ManagementStatus.SUCCESS, result.items.single().status)
         assertEquals("${md5(bytes)}.png", record.name)
         assertEquals(1000, record.time)
-        assertEquals(1024, record.order)
         assertArrayEquals(bytes, File(temporaryFolder.root, "repository/cats/${record.name}").readBytes())
         assertEquals(listOf(record), repository.getPack("cats").records)
     }
@@ -96,6 +94,31 @@ class EmoticonRepositoryTest {
         assertEquals(ManagementStatus.DUPLICATE, duplicate.status)
         assertEquals(first, duplicate.record)
         assertEquals(listOf(first), repository.getPack("cats").records)
+    }
+
+    @Test
+    fun batchImportPrependsNewRecordsInCandidateOrderWithoutChangingExistingRecord() {
+        val repository = repository()
+        repository.createPack("cats")
+        val existing = repository.import("cats", listOf(ImportCandidate("old.png", png(31))))
+            .items.single().record!!
+        val indexFile = File(temporaryFolder.root, "repository/cats/index.jsonl")
+        val existingLine = indexFile.readLines().single()
+        val firstBytes = png(32)
+        val secondBytes = png(33)
+
+        repository.import(
+            "cats",
+            listOf(
+                ImportCandidate("first.png", firstBytes),
+                ImportCandidate("second.png", secondBytes),
+            ),
+        )
+
+        val records = repository.getPack("cats").records
+        assertEquals(listOf(md5(firstBytes), md5(secondBytes), existing.md5), records.map { it.md5 })
+        assertEquals(existing, records.last())
+        assertEquals(existingLine, indexFile.readLines().last())
     }
 
     @Test
@@ -161,7 +184,7 @@ class EmoticonRepositoryTest {
     }
 
     @Test
-    fun movePreservesIdentityAndTimeButAllocatesTargetOrderAndClearsIcon() {
+    fun movePreservesIdentityAndTimeAndPrependsTargetRecord() {
         val repository = repository()
         repository.createPack("source")
         repository.createPack("target")
@@ -177,10 +200,9 @@ class EmoticonRepositoryTest {
         assertFalse(result.items.single().deduplicated)
         assertEquals(source.md5, moved.md5)
         assertEquals(source.time, moved.time)
-        assertEquals(2048, moved.order)
         assertFalse(moved.icon)
         assertTrue(repository.getPack("source").records.isEmpty())
-        assertEquals(2, repository.getPack("target").records.size)
+        assertEquals(moved.md5, repository.getPack("target").records.first().md5)
     }
 
     @Test
@@ -207,7 +229,7 @@ class EmoticonRepositoryTest {
     }
 
     @Test
-    fun reorderWritesCanonicalOrder() {
+    fun reorderWritesJsonlLineOrderWithoutChangingRecordFields() {
         val repository = repository()
         repository.createPack("cats")
         val first = repository.import("cats", listOf(ImportCandidate("a.png", png(8))))
@@ -215,10 +237,10 @@ class EmoticonRepositoryTest {
         val second = repository.import("cats", listOf(ImportCandidate("b.png", png(9))))
             .items.single().record!!
 
-        val reordered = repository.reorder("cats", listOf(second.md5, first.md5)).records
+        val reordered = repository.reorder("cats", listOf(first.md5, second.md5)).records
 
-        assertEquals(listOf(second.md5, first.md5), reordered.map { it.md5 })
-        assertEquals(listOf(1024L, 2048L), reordered.map { it.order })
+        assertEquals(listOf(first.md5, second.md5), reordered.map { it.md5 })
+        assertEquals(setOf(first, second), reordered.toSet())
     }
 
     private fun repository(): EmoticonRepository = EmoticonRepository(

@@ -11,7 +11,7 @@ import org.junit.rules.TemporaryFolder
 import top.e404.emorepo.config.AppSettings
 import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.protocol.index.IndexJsonlCodec
-import top.e404.emorepo.protocol.pack.PackOrderRecord
+import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 
 class JGitRepositoryServiceTest {
@@ -35,7 +35,7 @@ class JGitRepositoryServiceTest {
 
     @Test
     fun `sync resolves index conflict with local order and newest time`() {
-        val initial = listOf(record("a", 10, 1_024), record("b", 10, 2_048))
+        val initial = listOf(record("a", 10), record("b", 10))
         val remote = createRemoteWithInitialCommit { root ->
             File(root, "pack").mkdirs()
             File(root, "pack/index.jsonl").writeText(IndexJsonlCodec.encode(initial))
@@ -43,10 +43,10 @@ class JGitRepositoryServiceTest {
         val local = clone(remote, "conflict-local")
         val other = clone(remote, "conflict-other")
         File(local, "pack/index.jsonl").writeText(
-            IndexJsonlCodec.encode(listOf(record("b", 10, 1_024), record("a", 10, 2_048))),
+            IndexJsonlCodec.encode(listOf(record("b", 10), record("a", 10))),
         )
         File(other, "pack/index.jsonl").writeText(
-            IndexJsonlCodec.encode(listOf(record("a", 40, 1_024), record("b", 10, 2_048))),
+            IndexJsonlCodec.encode(listOf(record("a", 40), record("b", 10))),
         )
         commitAndPush(other, "remote change")
 
@@ -60,7 +60,7 @@ class JGitRepositoryServiceTest {
 
     @Test
     fun `sync resolves root index conflict and validates pack directories`() {
-        val initialOrder = listOf(PackOrderRecord("a", 1_024), PackOrderRecord("b", 2_048))
+        val initialOrder = listOf(PackIndexRecord("a"), PackIndexRecord("b"))
         val remote = createRemoteWithInitialCommit { root ->
             createEmptyPack(root, "a")
             createEmptyPack(root, "b")
@@ -70,12 +70,12 @@ class JGitRepositoryServiceTest {
         val other = clone(remote, "root-index-other")
         File(local, "index.jsonl").writeText(
             RootIndexJsonlCodec.encode(
-                listOf(PackOrderRecord("b", 1_024), PackOrderRecord("a", 2_048)),
+                listOf(PackIndexRecord("b"), PackIndexRecord("a")),
             ),
         )
         createEmptyPack(other, "c")
         File(other, "index.jsonl").writeText(
-            RootIndexJsonlCodec.encode(initialOrder + PackOrderRecord("c", 3_072)),
+            RootIndexJsonlCodec.encode(initialOrder + PackIndexRecord("c")),
         )
         commitAndPush(other, "remote adds pack")
 
@@ -83,8 +83,7 @@ class JGitRepositoryServiceTest {
 
         val verification = clone(remote, "root-index-verification")
         val records = RootIndexJsonlCodec.decode(File(verification, "index.jsonl").readText())
-        assertEquals(listOf("b", "a", "c"), records.map { it.name })
-        assertEquals(listOf(1_024L, 2_048L, 3_072L), records.map { it.order })
+        assertEquals(listOf("b", "c", "a"), records.map { it.name })
         assertTrue(File(verification, "c/index.jsonl").isFile)
     }
 
@@ -127,12 +126,11 @@ class JGitRepositoryServiceTest {
         File(directory, "index.jsonl").writeText("")
     }
 
-    private fun record(id: String, time: Long, order: Long) = EmoticonRecord(
+    private fun record(id: String, time: Long) = EmoticonRecord(
         name = id.repeat(32) + ".png",
         md5 = id.repeat(32),
         ext = "png",
         time = time,
-        order = order,
     )
 
     private fun settings() = AppSettings(

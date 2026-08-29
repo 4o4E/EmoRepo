@@ -6,7 +6,6 @@ fun selectPackCover(
     records: List<EmoticonRecord>,
     isAvailable: (EmoticonRecord) -> Boolean,
 ): EmoticonRecord? {
-    val ordered = records.sortedWith(compareBy<EmoticonRecord> { it.order }.thenBy { it.md5 })
-    return ordered.firstOrNull { it.icon && isAvailable(it) }
-        ?: ordered.firstOrNull(isAvailable)
+    return records.firstOrNull { it.icon && isAvailable(it) }
+        ?: records.firstOrNull(isAvailable)
 }

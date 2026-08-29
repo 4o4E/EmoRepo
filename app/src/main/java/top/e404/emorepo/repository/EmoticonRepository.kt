@@ -7,7 +7,7 @@ import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.ProtocolNames
 import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.protocol.index.IndexJsonlCodec
-import top.e404.emorepo.protocol.pack.PackOrderRecord
+import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 
 class EmoticonRepository(
@@ -24,24 +24,24 @@ class EmoticonRepository(
 
     fun listPacks(): List<EmoticonPack> = lock.withLock {
         val directories = packDirectories()
-        readPackOrder(directories).map { record ->
-            readPack(directories.first { it.name == record.name }, record.order)
+        readPackIndex(directories).map { record ->
+            readPack(directories.first { it.name == record.name })
         }
     }
 
     fun getPack(name: String): EmoticonPack = lock.withLock {
         val directory = requirePackDirectory(name)
-        readPack(directory, requirePackOrder(name))
+        requirePackIndexed(name)
+        readPack(directory)
     }
 
     fun initializePackOrder(): List<EmoticonPack> = lock.withLock {
         val directories = packDirectories()
         val index = rootIndexFile()
         if (!index.exists()) {
-            writePackOrder(temporaryPackOrder(directories))
+            writePackIndex(temporaryPackIndex(directories))
         }
-        val order = readPackOrder(directories)
-        order.map { record -> readPack(directories.first { it.name == record.name }, record.order) }
+        readPackIndex(directories).map { record -> readPack(directories.first { it.name == record.name }) }
     }
 
     fun reorderPacks(names: List<String>): List<EmoticonPack> = lock.withLock {
@@ -50,12 +50,10 @@ class EmoticonRepository(
         if (names.size != currentNames.size || names.toSet() != currentNames.toSet()) {
             throw ProtocolException("pack reorder list must contain every pack exactly once")
         }
-        val normalized = names.mapIndexed { index, name ->
-            PackOrderRecord(name, (index + 1L) * ORDER_STEP)
-        }
-        writePackOrder(normalized)
+        val normalized = names.map(::PackIndexRecord)
+        writePackIndex(normalized)
         normalized.map { record ->
-            readPack(directories.first { it.name == record.name }, record.order)
+            readPack(directories.first { it.name == record.name })
         }
     }
 
@@ -71,21 +69,20 @@ class EmoticonRepository(
 
     fun createPack(name: String): EmoticonPack = lock.withLock {
         val directories = packDirectories()
-        val currentOrder = readPackOrder(directories)
+        val currentIndex = readPackIndex(directories)
         val rootIndex = rootIndexFile()
         val previousRootContent = rootIndex.takeIf { it.exists() }?.let(AtomicFileStore::readText)
         val directory = resolvePackDirectory(name)
         if (directory.exists()) {
             throw ProtocolException("emoticon pack already exists: $name")
         }
-        val order = nextPackOrder(currentOrder)
         if (!directory.mkdir()) {
             throw IOException("cannot create emoticon pack: $name")
         }
         try {
             writeRecords(directory, emptyList())
-            writePackOrder(currentOrder + PackOrderRecord(name, order))
-            EmoticonPack(name, emptyList(), order)
+            writePackIndex(currentIndex + PackIndexRecord(name))
+            EmoticonPack(name, emptyList())
         } catch (error: Exception) {
             directory.deleteRecursively()
             if (previousRootContent == null) {
@@ -99,7 +96,9 @@ class EmoticonRepository(
 
     fun import(packName: String, candidates: List<ImportCandidate>): ManagementBatchResult = lock.withLock {
         val directory = requirePackDirectory(packName)
-        ManagementBatchResult(candidates.map { candidate -> importOne(directory, candidate) })
+        ManagementBatchResult(
+            candidates.asReversed().map { candidate -> importOne(directory, candidate) }.asReversed(),
+        )
     }
 
     fun delete(packName: String, md5Values: List<String>): ManagementBatchResult = lock.withLock {
@@ -121,7 +120,9 @@ class EmoticonRepository(
         }
         val sourceDirectory = requirePackDirectory(sourcePackName)
         val targetDirectory = requirePackDirectory(targetPackName)
-        ManagementBatchResult(md5Values.map { md5 -> moveOne(sourceDirectory, targetDirectory, md5) })
+        ManagementBatchResult(
+            md5Values.asReversed().map { md5 -> moveOne(sourceDirectory, targetDirectory, md5) }.asReversed(),
+        )
     }
 
     fun setIcon(packName: String, md5: String?): EmoticonPack = lock.withLock {
@@ -141,9 +142,7 @@ class EmoticonRepository(
             throw ProtocolException("reorder list must contain every emoticon exactly once")
         }
         val byMd5 = records.associateBy { it.md5 }
-        val updated = md5Order.mapIndexed { index, md5 ->
-            byMd5.getValue(md5).copy(order = (index + 1L) * ORDER_STEP)
-        }
+        val updated = md5Order.map(byMd5::getValue)
         writeAndVerify(directory, updated)
     }
 
@@ -165,7 +164,6 @@ class EmoticonRepository(
                 md5 = image.md5,
                 ext = image.extension,
                 time = currentTimeMillis(),
-                order = nextOrder(records),
             )
             val imageFile = File(directory, record.name)
             if (imageFile.exists() && !AtomicFileStore.readBytes(imageFile).contentEquals(image.bytes)) {
@@ -174,7 +172,7 @@ class EmoticonRepository(
             val createdImage = !imageFile.exists()
             if (createdImage) AtomicFileStore.writeBytes(imageFile, image.bytes)
             try {
-                writeAndVerify(directory, records + record)
+                writeAndVerify(directory, listOf(record) + records)
             } catch (error: Exception) {
                 if (createdImage) imageFile.delete()
                 throw error
@@ -224,10 +222,7 @@ class EmoticonRepository(
             }
             ManagementItemResult(md5, ManagementStatus.SUCCESS, targetExisting, deduplicated = true)
         } else {
-            val targetRecord = sourceRecord.copy(
-                icon = false,
-                order = nextOrder(targetRecords),
-            )
+            val targetRecord = sourceRecord.copy(icon = false)
             val targetFile = File(targetDirectory, targetRecord.name)
             val sourceBytes = AtomicFileStore.readBytes(sourceFile)
             if (targetFile.exists() && !AtomicFileStore.readBytes(targetFile).contentEquals(sourceBytes)) {
@@ -236,7 +231,7 @@ class EmoticonRepository(
             val createdTargetFile = !targetFile.exists()
             if (createdTargetFile) AtomicFileStore.writeBytes(targetFile, sourceBytes)
             try {
-                writeAndVerify(targetDirectory, targetRecords + targetRecord)
+                writeAndVerify(targetDirectory, listOf(targetRecord) + targetRecords)
                 writeAndVerify(sourceDirectory, sourceRecords.filterNot { it.md5 == md5 })
                 if (!sourceFile.delete()) {
                     throw IOException("cannot delete moved source image")
@@ -253,8 +248,8 @@ class EmoticonRepository(
         ManagementItemResult(md5, ManagementStatus.FAILED, message = error.message)
     }
 
-    private fun readPack(directory: File, order: Long): EmoticonPack =
-        EmoticonPack(directory.name, readRecords(directory), order)
+    private fun readPack(directory: File): EmoticonPack =
+        EmoticonPack(directory.name, readRecords(directory))
 
     private fun readRecords(directory: File): List<EmoticonRecord> {
         val index = File(directory, INDEX_FILE_NAME)
@@ -262,6 +257,7 @@ class EmoticonRepository(
         if (!index.exists()) {
             throw ProtocolException("emoticon pack has no $INDEX_FILE_NAME: ${directory.name}")
         }
+        LegacyOrderMigration.migratePack(index)
         return IndexJsonlCodec.decode(AtomicFileStore.readText(index))
     }
 
@@ -270,9 +266,10 @@ class EmoticonRepository(
     }
 
     private fun writeAndVerify(directory: File, records: List<EmoticonRecord>): EmoticonPack {
+        requirePackIndexed(directory.name)
         writeRecords(directory, records)
         val verified = readRecords(directory)
-        return EmoticonPack(directory.name, verified, requirePackOrder(directory.name))
+        return EmoticonPack(directory.name, verified)
     }
 
     private fun packDirectories(): List<File> = root.listFiles()
@@ -285,10 +282,11 @@ class EmoticonRepository(
         }
         .sortedBy { it.name }
 
-    private fun readPackOrder(directories: List<File>): List<PackOrderRecord> {
+    private fun readPackIndex(directories: List<File>): List<PackIndexRecord> {
         val index = rootIndexFile()
         AtomicFileStore.recover(index)
-        if (!index.exists()) return temporaryPackOrder(directories)
+        if (!index.exists()) return temporaryPackIndex(directories)
+        LegacyOrderMigration.migrateRoot(index)
         val records = RootIndexJsonlCodec.decode(AtomicFileStore.readText(index))
         val directoryNames = directories.map { it.name }.toSet()
         val recordNames = records.map { it.name }.toSet()
@@ -299,31 +297,21 @@ class EmoticonRepository(
                 "root index.jsonl does not match pack directories; missing=$missing, extra=$extra",
             )
         }
-        return records.sortedWith(compareBy<PackOrderRecord> { it.order }.thenBy { it.name })
+        return records
     }
 
-    private fun temporaryPackOrder(directories: List<File>): List<PackOrderRecord> =
-        directories.sortedBy { it.name }.mapIndexed { index, directory ->
-            PackOrderRecord(directory.name, (index + 1L) * ORDER_STEP)
-        }
+    private fun temporaryPackIndex(directories: List<File>): List<PackIndexRecord> =
+        directories.sortedBy { it.name }.map { directory -> PackIndexRecord(directory.name) }
 
-    private fun writePackOrder(records: List<PackOrderRecord>) {
+    private fun writePackIndex(records: List<PackIndexRecord>) {
         AtomicFileStore.writeText(rootIndexFile(), RootIndexJsonlCodec.encode(records))
         RootIndexJsonlCodec.decode(AtomicFileStore.readText(rootIndexFile()))
     }
 
-    private fun requirePackOrder(name: String): Long {
-        val directories = packDirectories()
-        return readPackOrder(directories).firstOrNull { it.name == name }?.order
-            ?: throw ProtocolException("root index.jsonl has no pack: $name")
-    }
-
-    private fun nextPackOrder(records: List<PackOrderRecord>): Long {
-        val maximum = records.maxOfOrNull { it.order } ?: 0L
-        if (maximum > Long.MAX_VALUE - ORDER_STEP) {
-            throw ProtocolException("pack order space exhausted; normalize packs first")
+    private fun requirePackIndexed(name: String) {
+        if (readPackIndex(packDirectories()).none { it.name == name }) {
+            throw ProtocolException("root index.jsonl has no pack: $name")
         }
-        return maximum + ORDER_STEP
     }
 
     private fun rootIndexFile(): File = File(root, INDEX_FILE_NAME)
@@ -348,16 +336,7 @@ class EmoticonRepository(
         return directory
     }
 
-    private fun nextOrder(records: List<EmoticonRecord>): Long {
-        val maximum = records.maxOfOrNull { it.order } ?: 0L
-        if (maximum > Long.MAX_VALUE - ORDER_STEP) {
-            throw ProtocolException("order space exhausted; normalize the pack first")
-        }
-        return maximum + ORDER_STEP
-    }
-
     private companion object {
         const val INDEX_FILE_NAME = "index.jsonl"
-        const val ORDER_STEP = 1024L
     }
 }

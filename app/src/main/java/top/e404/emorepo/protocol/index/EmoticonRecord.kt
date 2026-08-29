@@ -6,5 +6,4 @@ data class EmoticonRecord(
     val ext: String,
     val time: Long,
     val icon: Boolean = false,
-    val order: Long,
 )
