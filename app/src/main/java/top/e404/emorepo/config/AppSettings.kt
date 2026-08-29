@@ -13,6 +13,7 @@ data class AppSettings(
     val recentSyncDelayMinutes: Int = DEFAULT_RECENT_SYNC_DELAY_MINUTES,
     val backgroundSyncIntervalMinutes: Int = DEFAULT_BACKGROUND_SYNC_INTERVAL_MINUTES,
     val commitMessage: String = DEFAULT_COMMIT_MESSAGE,
+    val qqPanelColumns: Int = DEFAULT_QQ_PANEL_COLUMNS,
 )
 
 data class SetupInput(
@@ -45,6 +46,9 @@ fun AppSettings.validated(): AppSettings {
             backgroundSyncIntervalMinutes >= MINIMUM_BACKGROUND_SYNC_INTERVAL_MINUTES,
     ) { "后台同步间隔必须为 0 或至少 15 分钟" }
     require(commitMessage.isNotBlank()) { "提交信息不能为空" }
+    require(qqPanelColumns in MINIMUM_QQ_PANEL_COLUMNS..MAXIMUM_QQ_PANEL_COLUMNS) {
+        "QQ 面板每行表情数量必须为 3 到 8"
+    }
     return copy(
         remoteUrl = setup.remoteUrl,
         authorName = setup.authorName,
@@ -69,5 +73,8 @@ const val DEFAULT_RECENT_SYNC_DELAY_MINUTES = 30
 const val DEFAULT_BACKGROUND_SYNC_INTERVAL_MINUTES = 30
 const val MINIMUM_BACKGROUND_SYNC_INTERVAL_MINUTES = 15
 const val DEFAULT_COMMIT_MESSAGE = "Update local emoticons"
+const val DEFAULT_QQ_PANEL_COLUMNS = 4
+const val MINIMUM_QQ_PANEL_COLUMNS = 3
+const val MAXIMUM_QQ_PANEL_COLUMNS = 8
 
 private val EMAIL_PATTERN = Regex("^[^\\s@]+@[^\\s@]+$")

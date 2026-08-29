@@ -13,6 +13,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
+import kotlin.math.roundToInt
 import top.e404.emorepo.config.SyncPhase
 
 @Composable
@@ -40,6 +42,7 @@ fun SettingsScreen(state: EmoRepoState) {
         mutableStateOf(current.backgroundSyncIntervalMinutes.toString())
     }
     var commitMessage by remember(current) { mutableStateOf(current.commitMessage) }
+    var qqPanelColumns by remember(current) { mutableStateOf(current.qqPanelColumns) }
     var newToken by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { state.refreshSyncStatus() }
@@ -104,6 +107,18 @@ fun SettingsScreen(state: EmoRepoState) {
             }
         }
         item {
+            SettingsCard("QQ 面板") {
+                Text("每行 $qqPanelColumns 个表情")
+                Slider(
+                    value = qqPanelColumns.toFloat(),
+                    onValueChange = { qqPanelColumns = it.roundToInt() },
+                    valueRange = 3f..8f,
+                    steps = 4,
+                )
+                Text("增加列数会缩小单元格，并在同一屏显示更多表情。")
+            }
+        }
+        item {
             Button(
                 onClick = {
                     state.updateSettings(
@@ -115,6 +130,7 @@ fun SettingsScreen(state: EmoRepoState) {
                             recentSyncDelayMinutes = recentDelay.toIntOrNull() ?: -1,
                             backgroundSyncIntervalMinutes = backgroundInterval.toIntOrNull() ?: -1,
                             commitMessage = commitMessage,
+                            qqPanelColumns = qqPanelColumns,
                         ),
                     )
                 },

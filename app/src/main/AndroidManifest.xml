@@ -12,6 +12,18 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.EmoRepo">
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="在 QQ 中使用和管理 EmoRepo 表情" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+        <meta-data
+            android:name="xposedscope"
+            android:value="com.tencent.mobileqq" />
         <activity
             android:name=".MainActivity"
             android:exported="true">

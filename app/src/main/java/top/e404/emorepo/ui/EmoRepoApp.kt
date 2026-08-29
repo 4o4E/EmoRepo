@@ -59,13 +59,20 @@ private val topDestinations = listOf(
 )
 
 @Composable
-fun EmoRepoApp() {
+fun EmoRepoApp(settingsRequest: Int = 0) {
     val state = rememberEmoRepoState()
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
 
     LaunchedEffect(Unit) { state.reload() }
+    LaunchedEffect(settingsRequest, state.setupRequired) {
+        if (settingsRequest > 0 && !state.setupRequired) {
+            navController.navigate(SettingsRoute) {
+                launchSingleTop = true
+            }
+        }
+    }
 
     if (state.setupRequired) {
         Surface(Modifier.fillMaxSize()) { OnboardingScreen(state) }

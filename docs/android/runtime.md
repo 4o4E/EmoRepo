@@ -20,17 +20,21 @@
 
 ## QQ 进程访问
 
-QAux 外部模块代码运行在 QQ UID 下，不能直接访问上述私有目录。App 提供一个导出的受控 `ContentProvider`：
+EmoRepo LSPosed 适配代码运行在 QQ UID 下，不能直接访问上述私有目录。App 提供一个导出的受控 `ContentProvider`：
 
 - `query` 分页返回表情包和表情元数据。
+- `query` 同时提供 QQ 面板列数设置；表情包结果在根索引项前增加固定的合并设备“最近使用”虚拟包，虚拟项额外返回实际源表情包 ID。
 - `openFile` 返回图片的只读 `ParcelFileDescriptor`。
-- `call(record_use)` 是唯一写入口，只能在 QAux 收到 QQ 发送成功回调后追加本设备最近使用记录；不能修改表情包、图片或索引。
+- `call(record_use)` 在 QQ 发送成功回调后追加本设备最近使用记录。
+- `call(import_item)` 接收单个只读原图文件描述符；`call(import_items)` 接收最多 50 个文件描述符。两者按 64 MiB 单文件、256 MiB 批次总量逐项有界读取并导入，不能把整批文件同时读入内存。
+- 表情包元数据明确返回是否允许写入；“最近使用”等虚拟包只读，QQ 导入目标不得展示或接受只读包。
+- QQ 定位缓存调用只允许读写固定定位目标的类名、规则版本和宿主 APK 指纹；缓存位于 EmoRepo 私有配置，不进入 Git 仓库，也不向 QQ 暴露 App 私有路径。
 - 每次调用校验 `Binder.getCallingUid()` 对应包名，只允许 EmoRepo 自身和受支持 QQ 包。
 - 对 QQ 包进一步校验签名证书摘要，避免同包名伪装。
 - 不向调用方暴露仓库绝对路径、Git 目录或 Token。
 - Provider 不直接执行 Git 操作；最近使用写入完成后只按设置提交 WorkManager 同步任务。
 
-Manifest 已导出 Provider，查询、文件打开和最近使用调用均先完成调用方校验。真机已验证 QQ UID 可读取、shell UID 被拒绝；真实发送后的最近使用写入尚待验收。
+Manifest 已导出 Provider，查询、文件打开、导入、最近使用和定位缓存调用均先完成调用方校验。真机已验证 QQ UID 可读取和导入、shell UID 被拒绝；真实发送后的最近使用写入尚待验收。
 
 ## 后台同步
 

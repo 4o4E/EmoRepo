@@ -5,7 +5,7 @@
 
 ## 目标
 
-EmoRepo 管理一个保持现有 lite-tools 表情目录语义的 Git 仓库，并通过 QAuxiliary 向 Android QQ 提供表情。
+EmoRepo 管理一个保持现有 lite-tools 表情目录语义的 Git 仓库，并作为独立 LSPosed 模块接入 Android QQ。
 
 第一版包括：
 
@@ -14,11 +14,11 @@ EmoRepo 管理一个保持现有 lite-tools 表情目录语义的 Git 仓库，�
 - 使用 `recent/<deviceId>.csv` 保存每台设备的最近使用记录。
 - 使用 JGit 完成自动和手动同步。
 - 默认将仓库保存于 EmoRepo App 私有目录。
-- 通过待加入 QAux 的通用表情 Provider SPI 接入 QQ。
+- 在 QQ 原有图片消息菜单中增加“添加到 EmoRepo”。
+- 在 QQ 中提供独立 EmoRepo 表情面板，QQ 平台适配与仓库协议保持分离。
 
 ## 非目标
 
-- 不直接定位、Hook 或调用 QQ 内部类。
 - 不长期维护 QAuxiliary fork。
 - 不支持 TIM、QQ 国际版或其他宿主。
 - 不读取、迁移或双写旧 `index.json`。
@@ -29,6 +29,6 @@ EmoRepo 管理一个保持现有 lite-tools 表情目录语义的 Git 仓库，�
 ## 开发约束
 
 - EmoRepo 业务代码使用 Kotlin。
-- QAux 公共 SPI 可以为 ABI 稳定使用少量 Java。
+- QQ Hook 适配代码仍使用 Kotlin；运行时生成类只用于实现 QQ 菜单抽象类。
 - Apache-2.0 适用于本仓库原创代码。
 - 未在文档中确认的可观察逻辑不得实现。

@@ -1,6 +1,6 @@
 # 需求追踪
 
-- 更新：2026-08-27
+- 更新：2026-08-29
 
 状态含义见 [`README.md`](README.md)。代码列为空表示尚未实现。
 
@@ -9,8 +9,13 @@
 | BASE-001 | 项目身份为 EmoRepo / `top.e404.emorepo` | `decisions/0001-foundation.md` | implemented | Gradle、Manifest |
 | BASE-002 | 业务代码使用 Kotlin | `decisions/0001-foundation.md` | implemented | App 骨架 |
 | SCOPE-001 | 只支持 Android QQ | `scope.md` | confirmed | — |
-| QAUX-001 | 不直接 Hook QQ，依赖通用 QAux Provider | `architecture/qaux-integration.md` | implemented | `EmoRepoQAuxEntry`、`EmoRepoQAuxProvider`；QAux Dev 真机注册/表情包/GIF 已通过，真实发送待验收 |
+| QAUX-001 | 不直接 Hook QQ，依赖通用 QAux Provider | `architecture/qaux-integration.md` | superseded | 已由独立 LSPosed 方案取代，历史实验分支保留 |
 | QAUX-002 | QAux 本地和 Provider 的 GIF 按原始时间轴播放并支持最高 100 FPS，发送仍使用原文件 | `architecture/qaux-integration.md` | verified | QAux `GifFrameTiming`、`GifLoopController`、`ExactTimingGifDecoder`、`StickerGifDrawable`；6 项 JVM 测试、Debug APK 构建、537 帧双循环时长、100 条最近记录/20 个封面可见性、有限循环与快速关闭真机验收 |
+| EXP-001 | 独立 LSPosed 模块验证 QQ 原生表情面板、EmoRepo IPC 和图片菜单接点 | `experiments/standalone-lsposed.md` | verified | QAux 禁用时，LSPosed 独立加载、原生面板 Hook、QQ UID 读取 34 个表情包、自定义图片菜单及 `PicElement` 提取均已真机通过 |
+| HOOK-001 | QQ 图片消息菜单增加“添加到 EmoRepo”并导入表情仓库 | `decisions/0005-standalone-lsposed.md` | verified | `EmoRepoMessageMenuHook`、受控导入 IPC；QQ 缓存原图、PFD 导入、MD5/索引落盘和 App 界面均已真机验收 |
+| COMPAT-001 | 参考 QAux 已验证的目标特征和结构判断，由 EmoRepo 独立动态定位 QQ 混淆符号并按宿主指纹缓存 | `decisions/0005-standalone-lsposed.md` | verified | `QqSymbolLocator`、`IsolatedDexKitRunner`、定位缓存 IPC、`UniqueCandidateSelectorTest`；QQ 9.1.70 冷扫描、异版本 DexKit 隔离、重启缓存和图片菜单真机验收 |
+| HOOK-002 | 长按 QQ 表情按钮打开 EmoRepo 面板，按仓库顺序浏览、预览并通过当前 QQ 会话发送原文件 | `architecture/qq-panel.md` | implemented | `QqPanelIntegration`、`QqSessionTracker`、`EmoRepoPanelDialog`、`QqPanelFileCache`、`QqPanelFirstFrameCache`、`QqMessageSender`；静态图解码 LRU、24 MiB 首帧内存/96 MiB WebP 磁盘缓存、当前包全量预览预加载、GIF 离屏释放、同步占位、任务取消和文件租约已实现；预加载/长包回滚需用户验收，多窗口/私聊/群频道/失败/淘汰待验收 |
+| HOOK-003 | QQ 图片消息单图和多图经目标选择、二次确认和带 rkey 的原图读取后批量导入 EmoRepo | `architecture/qq-panel.md` | implemented | `EmoRepoMessageMenuHook`、`QqRkeyStore`、`import_items` IPC、`BoundedImportReaderTest`；虚拟包过滤、50 张/64 MiB 单文件/256 MiB 批次边界和逐项读取已实现，实际多图和未缓存 `/download` rkey 下载待验收 |
 | DATA-001 | 保持当前表情目录语义 | `protocol/repository.md` | confirmed | — |
 | DATA-002 | `index.jsonl` 严格编解码和记录校验 | `protocol/index-jsonl.md` | verified | `IndexJsonlCodec`、`IndexJsonlCodecTest` |
 | DATA-003 | `order` 是唯一最终显示顺序 | `protocol/index-jsonl.md` | confirmed | — |
@@ -46,10 +51,11 @@
 | UI-017 | 软件设置底部路由使用矢量齿轮图标 | `ui/app.md` | verified | `ic_settings.xml`；Android 底部路由验收 |
 | UI-018 | 主页表情包支持长按卡片拖动并在完成时持久化根索引顺序 | `ui/app.md` | verified | `PackCollection`、`EmoRepoState.reorderPacks`、`PackReorderTest`；首次长按、模式内直接连续拖动、取消/返回/完成及哈希真机验收 |
 | UI-019 | 添加页复用表情包列表/四列平铺和布局切换 | `ui/app.md` | verified | `PackCollection`、`PackLayoutSelector`；共享布局、选择高亮和导入按钮真机验收 |
+| UI-020 | 软件设置可选择 QQ 面板每行 3–8 个表情并在下次打开面板时生效 | `ui/app.md` | verified | `AppSettings`、`SettingsStore`、`SettingsScreen`、`EmoRepoContentProvider`；边界 JVM 测试，App 保存 6 列及 QQ 真机首行 6 个验收 |
 | IMAGE-002 | 缩略图使用有界内存/磁盘缓存、并发去重和平台动画解码器加速 | `management/emoticons.md` | verified | `ThumbnailCache`、Coil 3.4；Android 冷/热打开、滚动内存和 GIF 双帧验收 |
 | MANAGE-001 | 管理领域层支持单个和批量导入、删除、移动表情 | `management/emoticons.md` | verified | `EmoticonRepository`、`EmoticonRepositoryTest` |
 | MANAGE-002 | 删除和移动同步更新本设备最近使用记录 | `management/emoticons.md` | implemented | `EmoRepoState.deleteEmoticons`、`moveEmoticons` |
-| MANAGE-003 | 从多选框拖动，按视觉顺序连续选择起点到终点 | `management/emoticons.md` | implemented | `PackManagerScreen`、`RangeSelectionTest`；真机手势验收待完成 |
+| MANAGE-003 | 从多选框长按后拖动，按视觉顺序连续选择起点到终点 | `management/emoticons.md` | implemented | `PackManagerScreen` 使用 `detectDragGesturesAfterLongPress`、`RangeSelectionTest`；滚动与长按拖选真机验收待完成 |
 | IMAGE-001 | 缩略图使用插值过滤，禁止最近邻缩放 | `management/emoticons.md` | verified | `FilteredThumbnail` |
 | STORE-002 | 单文件刷新、替换和中断恢复 | `management/persistence.md` | verified | `AtomicFileStore`、`AtomicFileStoreTest` |
 | STORE-003 | 图片和多个索引之间使用可恢复事务日志 | `management/persistence.md` | confirmed | — |

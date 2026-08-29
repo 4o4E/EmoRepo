@@ -13,11 +13,28 @@ val versionProperties = Properties().apply {
 val baseVersion = requireNotNull(versionProperties.getProperty("baseVersion")) {
     "version.properties 缺少 baseVersion"
 }
+val baseVersionParts = baseVersion.split('.').map { part ->
+    part.toIntOrNull() ?: error("baseVersion 必须是 SemVer：$baseVersion")
+}
+require(
+    baseVersionParts.size == 3 &&
+        baseVersionParts.all { it >= 0 } &&
+        baseVersionParts[1] <= 999 &&
+        baseVersionParts[2] <= 999,
+) {
+    "baseVersion 必须是 SemVer，且 minor/patch 必须小于 1000：$baseVersion"
+}
+val baseVersionCodeLong =
+    baseVersionParts[0].toLong() * 1_000_000L + baseVersionParts[1] * 1_000L + baseVersionParts[2]
+require(baseVersionCodeLong in 1..Int.MAX_VALUE.toLong()) {
+    "baseVersion 对应的 versionCode 越界：$baseVersionCodeLong"
+}
+val baseVersionCode = baseVersionCodeLong.toInt()
 val configuredVersionName = providers.gradleProperty("emorepo.versionName")
     .orElse("$baseVersion-dev")
 val configuredVersionCode = providers.gradleProperty("emorepo.versionCode")
     .map { value -> value.toIntOrNull() ?: error("emorepo.versionCode 必须是整数") }
-    .orElse(1)
+    .orElse(baseVersionCode)
 val ciKeystorePath = providers.environmentVariable("EMOREPO_KEYSTORE_PATH").orNull
 val ciStorePassword = providers.environmentVariable("EMOREPO_STORE_PASSWORD").orNull
 val ciKeyAlias = providers.environmentVariable("EMOREPO_KEY_ALIAS").orNull
@@ -58,7 +75,6 @@ android {
 
     buildTypes {
         getByName("debug") {
-            applicationIdSuffix = ".dev"
             isDebuggable = true
             if (hasCiSigning) {
                 signingConfig = signingConfigs.getByName("ci")
@@ -81,6 +97,11 @@ android {
         }
     }
 
+    packaging {
+        // 独立 ClassLoader 需要真实 nativeLibraryDir，不能只依赖 APK 内的未解压库。
+        jniLibs.useLegacyPackaging = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -101,7 +122,12 @@ android {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
 
-    compileOnly("io.github.qauxv:emoticon-provider-api:1.0.0")
+    compileOnly("de.robv.android.xposed:api:82")
+    implementation("net.bytebuddy:byte-buddy:1.18.12-jdk5")
+    implementation("net.bytebuddy:byte-buddy-android:1.18.12") {
+        exclude(group = "net.bytebuddy", module = "byte-buddy")
+    }
+    implementation("org.luckypray:dexkit:2.2.0")
     implementation("org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
     implementation("com.google.code.gson:gson:2.14.0")
     implementation(composeBom)
@@ -110,7 +136,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.8")
+    implementation("androidx.viewpager2:viewpager2:1.1.0")
     implementation("androidx.work:work-runtime:2.11.2")
     implementation("me.saket.telephoto:zoomable:0.19.0")
     implementation("io.coil-kt.coil3:coil-compose:3.4.0")

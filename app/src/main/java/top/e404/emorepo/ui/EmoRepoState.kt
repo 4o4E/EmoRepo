@@ -1,6 +1,7 @@
 package top.e404.emorepo.ui
 
 import android.content.Context
+import android.app.Application
 import android.database.Cursor
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -9,9 +10,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
 import java.io.File
 import java.util.concurrent.CancellationException
 import kotlin.concurrent.withLock
@@ -31,9 +33,13 @@ import top.e404.emorepo.git.JGitRepositoryService
 import top.e404.emorepo.repository.EmoticonPack
 import top.e404.emorepo.repository.EmoticonRepository
 import top.e404.emorepo.repository.ImportCandidate
+import top.e404.emorepo.repository.ImportLimits
+import top.e404.emorepo.repository.ManagementBatchResult
+import top.e404.emorepo.repository.ManagementItemResult
 import top.e404.emorepo.repository.ManagementStatus
 import top.e404.emorepo.repository.RecentUsageRepository
 import top.e404.emorepo.repository.RepositoryLocks
+import top.e404.emorepo.repository.readImportBytes
 import top.e404.emorepo.security.KeystoreTokenStore
 
 @Stable
@@ -163,9 +169,11 @@ class EmoRepoState(
                 }
             }
             result.onSuccess { valid ->
+                val recentFilesMayHaveChanged = valid.deviceId != settings.deviceId ||
+                    valid.recentMaximumRecords != settings.recentMaximumRecords
                 settings = valid
                 GitSyncScheduler.updatePeriodic(context, valid)
-                GitSyncScheduler.requestAfterModification(context)
+                if (recentFilesMayHaveChanged) GitSyncScheduler.requestAfterModification(context)
                 message = "设置已保存"
             }.onFailure { error ->
                 if (error is CancellationException) throw error
@@ -313,17 +321,28 @@ class EmoRepoState(
         if (uris.isEmpty()) return
         manage(
             operation = {
-                val candidates = uris.map { uri ->
-                    val displayName = context.displayName(uri)
-                    ImportCandidate(
-                        sourceName = displayName,
-                        bytes = context.contentResolver.openInputStream(uri).use { input ->
-                            requireNotNull(input) { "无法读取 $displayName" }
-                            input.readBytes()
-                        },
-                    )
+                require(uris.size <= ImportLimits.MAXIMUM_ITEMS) {
+                    "单次最多导入 ${ImportLimits.MAXIMUM_ITEMS} 张图片"
                 }
-                val result = import(packName, candidates)
+                var remainingBytes = ImportLimits.MAXIMUM_BATCH_BYTES
+                val items = uris.map { uri ->
+                    val displayName = context.displayName(uri)
+                    runCatching {
+                        val imported = context.contentResolver.openInputStream(uri).use { input ->
+                            requireNotNull(input) { "无法读取 $displayName" }
+                            input.readImportBytes(remainingBytes)
+                        }
+                        remainingBytes -= imported.size
+                        import(packName, listOf(ImportCandidate(displayName, imported.bytes))).items.single()
+                    }.getOrElse { error ->
+                        ManagementItemResult(
+                            source = displayName,
+                            status = ManagementStatus.FAILED,
+                            message = error.message,
+                        )
+                    }
+                }
+                val result = ManagementBatchResult(items)
                 "导入 ${result.succeeded}，重复 ${result.duplicated}，失败 ${result.failed}"
             },
             onComplete = onComplete,
@@ -361,9 +380,11 @@ class EmoRepoState(
 
 @Composable
 fun rememberEmoRepoState(): EmoRepoState {
-    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    val scope = rememberCoroutineScope()
-    return remember(context, scope) { EmoRepoState(context, scope) }
+    return viewModel<EmoRepoStateViewModel>().state
+}
+
+class EmoRepoStateViewModel(application: Application) : AndroidViewModel(application) {
+    val state = EmoRepoState(application.applicationContext, viewModelScope)
 }
 
 private fun Context.displayName(uri: Uri): String {

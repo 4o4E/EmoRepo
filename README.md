@@ -1,14 +1,14 @@
 # EmoRepo
 
-EmoRepo（表情仓）是面向 Android QQ 的开发者自用表情仓库管理器。它负责管理本地表情、Git 同步和向 QAuxiliary 提供表情数据；QQ 定位、Hook 和发送适配由 QAuxiliary 负责。
+EmoRepo（表情仓）是面向 Android QQ 的表情仓库管理器。它负责管理本地表情、Git 同步，并作为独立 LSPosed 模块在 QQ 中提供浏览、预览、发送和图片导入能力。
 
-当前已实现严格的 `index.jsonl` / 最近使用 CSV、表情管理领域层和 Compose 管理界面。Git 同步、QAux Provider 及 QQ 进程集成仍在开发中。
+当前已实现严格的 `index.jsonl` / 最近使用 CSV、表情管理、Compose 管理界面、JGit 同步、受控 Provider 和 QQ 主进程适配。
 
 ## 项目信息
 
 - 包名：`top.e404.emorepo`
-- 语言：Kotlin；QAux 公共 SPI 允许使用少量 Java
-- Android：minSdk 24、targetSdk 36、compileSdk 37.0
+- 语言：Kotlin
+- Android：minSdk 24、targetSdk 36、compileSdk 36
 - 构建：JDK 17、Gradle 9.7.0、AGP 9.3.1
 - Git：JGit
 - 许可证：Apache-2.0
@@ -28,4 +28,4 @@ $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 .\gradlew.bat testDebugUnitTest lintDebug assembleDebug
 ```
 
-Debug APK 输出到 `app\build\outputs\apk\debug\app-debug.apk`。
+Debug APK 按 ABI 输出到 `app\build\outputs\apk\debug\`，包括 `app-arm64-v8a-debug.apk` 和 `app-universal-debug.apk`。

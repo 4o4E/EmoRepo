@@ -32,14 +32,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
-      - name: 检出固定 QAux Provider API
-        uses: actions/checkout@v5
-        with:
-          repository: 4o4E/QAuxiliary
-          ref: f6e6aa3d3ec802a372b7e9aaa08cec2b4a509828
-          path: QAuxiliary
-          sparse-checkout: loader/emoticon-provider-api
-
       - name: 配置 Java
         uses: actions/setup-java@v5
         with:

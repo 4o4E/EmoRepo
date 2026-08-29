@@ -19,6 +19,9 @@
 13. [`management/persistence.md`](management/persistence.md)：管理写入和中断恢复。
 14. [`release/ci-and-updates.md`](release/ci-and-updates.md)：CI 渠道、签名、标签发布和更新索引。
 15. [`traceability.md`](traceability.md)：确认和实现状态。
+16. [`experiments/standalone-lsposed.md`](experiments/standalone-lsposed.md)：独立 Hook QQ 的隔离能力验证。
+17. [`decisions/0005-standalone-lsposed.md`](decisions/0005-standalone-lsposed.md)：独立 LSPosed QQ 适配决策。
+18. [`architecture/qq-panel.md`](architecture/qq-panel.md)：QQ 长按入口、EmoRepo 面板、发送和导入闭环。
 
 ## 状态
 

@@ -2,7 +2,7 @@ package top.e404.emorepo.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -360,7 +360,7 @@ private fun DragSelectionCheckbox(
             .size(48.dp)
             .onGloballyPositioned { coordinates = it }
             .pointerInput(Unit) {
-                detectDragGestures(
+                detectDragGesturesAfterLongPress(
                     onDragStart = { local ->
                         coordinates?.localToRoot(local)?.let(currentDragStart)
                     },

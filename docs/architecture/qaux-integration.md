@@ -1,8 +1,10 @@
 # QAux 集成
 
-- 状态：`implemented`
+- 状态：`superseded`
 - 更新：2026-08-26
 - 核对基线：QAuxiliary 上游 main `805cb4f7`
+
+本方案已由 [`../decisions/0005-standalone-lsposed.md`](../decisions/0005-standalone-lsposed.md) 取代，内容仅保留为历史验证记录。
 
 ## 当前外部模块加载契约
 
@@ -40,7 +42,7 @@ QAux 当前会在其完成基础初始化且未进入安全模式的每个 QQ �
 - `app/src/main/java/io/github/qauxv/chainloader/detail/ExternalModuleManager.kt`
 - `app/src/main/java/io/github/qauxv/core/MainHook.java`
 
-EmoRepo APK 已写入 `META-INF/qauxv/module.prop`，入口为 `top.e404.emorepo.integration.qaux.EmoRepoQAuxEntry`。
+历史实现曾在 EmoRepo APK 写入 `META-INF/qauxv/module.prop` 并使用 `top.e404.emorepo.integration.qaux.EmoRepoQAuxEntry`；独立 LSPosed 方案确认后，这些入口和 QAux Provider API 编译依赖均已移除。
 
 ## QAux PR 边界
 

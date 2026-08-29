@@ -7,7 +7,7 @@
 
 EmoRepo 只发布两个渠道：
 
-- `dev`：普通分支 push 和手动触发 GitHub Actions 时构建。使用 `debug` 构建类型，开启 Android 调试，应用 ID 为 `top.e404.emorepo.dev`，应用名为“表情仓 Dev”。产物只保存在 Actions Artifact，不创建 GitHub Release。
+- `dev`：普通分支 push 和手动触发 GitHub Actions 时构建。使用 `debug` 构建类型并开启 Android 调试；独立 Hook 方案确定后，调试版和正式版统一使用应用 ID `top.e404.emorepo` 与应用名“表情仓”，新调试包会直接覆盖同签名的旧安装。产物只保存在 Actions Artifact，不创建 GitHub Release。
 - `release`：只有严格匹配 `v<major>.<minor>.<patch>` 的标签触发。使用 `release` 构建类型，应用 ID 为 `top.e404.emorepo`，产物上传到对应 GitHub Release。
 
 两个渠道都生成以下 APK：
@@ -26,21 +26,12 @@ CI 中两个渠道使用同一套持久签名凭据，保证同一应用 ID 的�
 
 - release 的 `versionName` 直接取标签去掉前导 `v` 的 SemVer，例如 `v0.1.0` 对应 `0.1.0`。
 - release 的 `versionCode` 为 `major * 1,000,000 + minor * 1,000 + patch`；`minor` 和 `patch` 必须在 `0..999`。
-- dev 的 `versionName` 为 `<下一个基线版本>-dev.<run_number>.<short_sha>`，`versionCode` 使用 GitHub Actions `run_number`。
+- dev 的 `versionName` 为 `<基线版本>-dev.<run_number>.<short_sha>`，`versionCode` 与 `baseVersion` 的 SemVer 计算值一致。dev 与 release 共用包名和签名，同版本码允许相互覆盖，避免已安装 release 时被 Android 判定为降级。
 - release 标签必须指向已经推送到默认分支的提交；workflow 会再次校验标签格式和版本范围。
 
-## ABI 与 Provider API
+## ABI
 
 APK 同时包含 Compose 依赖的 ABI 原生库，因此 CI 发布 universal 和四种 ABI 分包。ABI 分包只减少无关原生库，不改变 Kotlin/Java 功能。
-
-EmoRepo 使用 QAux Provider API 的 compile-only 复合构建。GitHub Actions 固定检出：
-
-```text
-repository: 4o4E/QAuxiliary
-commit: f6e6aa3d3ec802a372b7e9aaa08cec2b4a509828
-```
-
-不得在 workflow 中跟随浮动分支；升级 SPI 时先更新并验证 QAux 提交，再更新此固定值。
 
 ## 签名 Secrets
 
@@ -103,6 +94,7 @@ https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 
 ## 2026-08-27 dev 验收
 
+- 以下记录发生在应用 ID 统一之前，仅作为历史构建证据；当前 dev 已不再使用 `.dev` 后缀，需在下一次 CI 中重新验收正式包覆盖行为。
 - GitHub Actions run `33034944943` 成功完成测试、五 APK 构建和 Artifact 上传。
 - Artifact 名为 `EmoRepo-dev-4-38885745cf2601fd34bbc262cd03b30184eeb1a3`，包含 universal、arm64-v8a、armeabi-v7a、x86、x86_64 和 `SHA256SUMS`。
 - 五个 SHA-256 全部通过；universal APK 的应用 ID 为 `top.e404.emorepo.dev`、`versionCode=4`、`versionName=0.1.0-dev.4.3888574`、`debuggable=true`，签名证书 SHA-256 与 `version.properties` 一致。

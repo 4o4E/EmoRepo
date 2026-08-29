@@ -32,6 +32,18 @@ class AppSettingsTest {
         }
     }
 
+    @Test
+    fun `requires QQ panel columns between three and eight`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            settings().copy(qqPanelColumns = 2).validated()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            settings().copy(qqPanelColumns = 9).validated()
+        }
+        assertEquals(3, settings().copy(qqPanelColumns = 3).validated().qqPanelColumns)
+        assertEquals(8, settings().copy(qqPanelColumns = 8).validated().qqPanelColumns)
+    }
+
     private fun settings(
         remoteUrl: String = "https://example.com/owner/repository.git",
         authorEmail: String = "user@example.com",

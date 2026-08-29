@@ -1,7 +1,9 @@
 # QAux 边界
 
-- 状态：`confirmed`
+- 状态：`superseded`
 - 日期：2026-08-25
+
+本决策已由 [`0005-standalone-lsposed.md`](0005-standalone-lsposed.md) 取代。
 
 ## 决策
 

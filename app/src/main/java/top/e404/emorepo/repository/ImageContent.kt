@@ -21,7 +21,7 @@ internal object ImageContentInspector {
         }
         val digest = MessageDigest.getInstance("MD5").digest(bytes)
         val md5 = digest.joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        return ImageContent(bytes.copyOf(), md5, extension)
+        return ImageContent(bytes, md5, extension)
     }
 
     private fun ByteArray.startsWith(vararg expected: Int): Boolean =

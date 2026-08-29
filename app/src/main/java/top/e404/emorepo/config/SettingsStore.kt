@@ -45,6 +45,7 @@ class SettingsStore(context: Context) {
             ),
             commitMessage = preferences.getString(KEY_COMMIT_MESSAGE, DEFAULT_COMMIT_MESSAGE)
                 ?: DEFAULT_COMMIT_MESSAGE,
+            qqPanelColumns = preferences.getInt(KEY_QQ_PANEL_COLUMNS, DEFAULT_QQ_PANEL_COLUMNS),
         )
     }
 
@@ -60,6 +61,7 @@ class SettingsStore(context: Context) {
             putInt(KEY_RECENT_SYNC_DELAY_MINUTES, valid.recentSyncDelayMinutes)
             putInt(KEY_BACKGROUND_SYNC_INTERVAL_MINUTES, valid.backgroundSyncIntervalMinutes)
             putString(KEY_COMMIT_MESSAGE, valid.commitMessage)
+            putInt(KEY_QQ_PANEL_COLUMNS, valid.qqPanelColumns)
         }
     }
 
@@ -92,6 +94,7 @@ class SettingsStore(context: Context) {
         private const val KEY_RECENT_SYNC_DELAY_MINUTES = "recent_sync_delay_minutes"
         private const val KEY_BACKGROUND_SYNC_INTERVAL_MINUTES = "background_sync_interval_minutes"
         private const val KEY_COMMIT_MESSAGE = "commit_message"
+        private const val KEY_QQ_PANEL_COLUMNS = "qq_panel_columns"
         private const val KEY_SYNC_PHASE = "sync_phase"
         private const val KEY_LAST_SUCCESS_TIME = "last_success_time"
         private const val KEY_LAST_ERROR = "last_error"
