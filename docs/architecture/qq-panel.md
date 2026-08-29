@@ -163,3 +163,15 @@ EmoRepo 在 Android QQ NT 聊天页提供一条完整且独立于 QAux 的使用
 - 全包预加载冷缓存验收时清空 QQ 内本功能的原文件和首帧目录，只选择“可爱”且完全不滚动；后台完成 `total=226, failed=0`，其余约 17 个项目由首屏可见加载并行生成。随后快速滚到底部，未浏览区域已经全部显示预览，没有空白格或图片错误。
 - 邻页完整内容禁用后，同一冷启动仅打开当前包时 QQ 原文件缓存约 44 MiB，低于修改前约 100 MiB；首帧磁盘写入进行中时约 2.1 MiB。该对比证明全包预览没有通过复制 176 MiB 的“可爱”完整原文件实现，邻页也不再提前读取完整内容。
 - 本轮仅打开、切包和滚动面板，最终用返回键关闭并仍停留在“洛”聊天，没有点击或发送任何表情。
+
+## 2026-08-30 QAux 共存检查
+
+- 同时启用 QAux release `1.5.9.r2847.be244e9` 与 EmoRepo 后，QQ `9.1.70` 冷启动正常；短按表情按钮仍打开 QQ/QAux 原面板，长按打开 EmoRepo 面板。
+- 图片长按菜单同时保留 EmoRepo“添加到…”、QAux“+1”和 QQ 原生“存表情/转发/多选”等项目，没有重复 EmoRepo 项或菜单崩溃。
+- QAux 和 EmoRepo 都 Hook 会话生命周期及菜单构造，但 Xposed 回调可并存；日志没有 `UnsatisfiedLinkError`、`nativeInitDexKit` 不匹配或 EmoRepo Hook 异常，隔离 DexKit 方案有效。
+- QAux 的外部插件列表曾残留唯一一条启用记录 `top.e404.emorepo`，会把当前独立 APK 再按旧 QAux 模块加载并报告缺少 `META-INF/qauxv/module.prop`。2026-08-30 已按用户确认删除该旧记录；不能把旧入口文件加回 EmoRepo，否则会重复安装 Hook。
+- QQ 私有缓存中约 119 MiB 的旧 `cache/qauxv/emoticon_provider` 同期已删除；该目录属于旧 QAux Provider 实验缓存，不影响 EmoRepo 当前缓存。
+- `io.github.qauxv.dev` 已卸载，后续源码对照固定使用 QAux `main` `805cb4f7`，真机只保留原先安装的 QAux release `1.5.9.r2847.be244e9`。
+- QAux `main` 的 `StickerPanelEntryHooker` 与 EmoRepo 都会直接调用同一表情按钮的 `setOnLongClickListener`，系统最终只保留一个监听器，不会同时打开两个面板。2026-08-30 开启 QAux“表情面板”后完成三次有效冷启动：每次长按都只出现一个 EmoRepo GridView，按一次返回后没有隐藏的 QAux 面板，短按仍进入 QQ/QAux 原面板；QQ 进程没有崩溃、窗口泄漏、BadToken 或 DexKit/JNI 异常。当前安装顺序下 EmoRepo 稳定覆盖 QAux，用户可关闭任意一方决定保留哪个长按面板。
+- 清理后冷启动确认 QAux release 与 EmoRepo 同时加载，旧 `module.prop` 错误、DexKit JNI 冲突和启动崩溃均未再出现；再次进入“洛”后长按面板顺序正常。
+- 同轮 QAux 的 `MainChatsCardContainerPartImpl`、`GroupSpecialCare` 和 `MultiActionHook` 定位失败堆栈没有经过 EmoRepo，属于 QAux release 对当前 QQ 的独立兼容问题。
