@@ -57,14 +57,14 @@ class EmoticonRepository(
         }
     }
 
-    fun imageFile(packName: String, recordName: String): File = lock.withLock {
+    fun imageFile(packName: String, recordName: String): File {
         val directory = requirePackDirectory(packName)
         ProtocolNames.requireSafeSegment(recordName, "emoticon name")
         val file = File(directory, recordName).canonicalFile
         if (file.parentFile != directory) {
             throw ProtocolException("emoticon path escapes pack")
         }
-        file
+        return file
     }
 
     fun createPack(name: String): EmoticonPack = lock.withLock {

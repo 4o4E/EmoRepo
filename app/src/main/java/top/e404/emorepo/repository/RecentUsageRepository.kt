@@ -4,7 +4,7 @@ import java.io.File
 import java.io.IOException
 import java.security.SecureRandom
 import kotlin.concurrent.withLock
-import top.e404.emorepo.protocol.ProtocolException
+import top.e404.emorepo.protocol.ProtocolNames
 import top.e404.emorepo.protocol.recent.RecentCsvCodec
 import top.e404.emorepo.protocol.recent.RecentUsageRecord
 
@@ -126,7 +126,6 @@ class RecentUsageRepository(
     companion object {
         const val DEFAULT_MAXIMUM_RECORDS = 30
         private const val RECENT_DIRECTORY_NAME = "recent"
-        private val deviceIdPattern = Regex("[A-Za-z0-9_-]{1,48}")
         fun generateDeviceId(random: SecureRandom = SecureRandom()): String {
             val bytes = ByteArray(4).also(random::nextBytes)
             return "android-" + bytes.joinToString("") { byte ->
@@ -135,9 +134,7 @@ class RecentUsageRepository(
         }
 
         fun validateDeviceId(value: String) {
-            if (!deviceIdPattern.matches(value)) {
-                throw ProtocolException("device ID must match [A-Za-z0-9_-]{1,48}")
-            }
+            ProtocolNames.requireSafeSegment(value, "device ID")
         }
     }
 }

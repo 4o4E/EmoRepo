@@ -21,7 +21,7 @@
 | DATA-003 | 根索引和包内索引都以 JSONL 行序作为唯一最终顺序，不保存 `order` | `protocol/index-jsonl.md`、`protocol/root-index-jsonl.md` | verified | `IndexJsonlCodec`、`RootIndexJsonlCodec`、`LegacyOrderMigration`、`EmoticonRepository`；JVM 测试、`face` 31 文件迁移核对及 App/QQ 真机顺序验收 |
 | DATA-004 | 最近使用 CSV 编解码、去重和稳定排序 | `protocol/recent-csv.md` | verified | `RecentCsvCodec`、`RecentCsvCodecTest` |
 | DATA-005 | 不兼容旧 `index.json` | `scope.md` | confirmed | — |
-| DATA-006 | 最近使用按设备文件保存、改名和限制数量 | `protocol/recent-csv.md` | verified | `RecentUsageRepository`、`RecentUsageRepositoryTest` |
+| DATA-006 | 最近使用按设备文件保存、按安全路径段自由命名、改名和限制数量 | `protocol/recent-csv.md` | verified | `RecentUsageRepository`、`RecentUsageRepositoryTest` |
 | DATA-007 | 根目录 `index.jsonl` 控制 App 和 QAux 的表情包顺序 | `protocol/root-index-jsonl.md` | verified | `RootIndexJsonlCodec`、`EmoticonRepository`、`ProtocolConflictResolver`；编解码/仓库/JGit 冲突测试和 QAux 真机顺序验收 |
 | GIT-001 | Android 使用 JGit | `decisions/0003-git-and-storage.md` | verified | `JGitRepositoryService`、`JGitRepositoryServiceTest`、`GitHubProxyIntegrationTest`；private GitHub 真机 clone/push/二次 clone 验收 |
 | AUTH-001 | HTTPS Token 使用 Android Keystore 保护且不回显 | `git/authentication.md` | verified | `KeystoreTokenStore`；Android 真机密文写入/清除验收 |
@@ -52,7 +52,7 @@
 | UI-018 | 主页表情包支持长按卡片拖动并在完成时持久化根索引顺序 | `ui/app.md` | verified | `PackCollection`、`EmoRepoState.reorderPacks`、`PackReorderTest`；首次长按、模式内直接连续拖动、取消/返回/完成及哈希真机验收 |
 | UI-019 | 添加页复用表情包列表/四列平铺和布局切换 | `ui/app.md` | verified | `PackCollection`、`PackLayoutSelector`；共享布局、选择高亮和导入按钮真机验收 |
 | UI-020 | 软件设置可选择 QQ 面板每行 3–8 个表情并在下次打开面板时生效 | `ui/app.md` | verified | `AppSettings`、`SettingsStore`、`SettingsScreen`、`EmoRepoContentProvider`；边界 JVM 测试，App 保存 6 列及 QQ 真机首行 6 个验收 |
-| IMAGE-002 | 缩略图使用有界内存/磁盘缓存、并发去重和平台动画解码器加速 | `management/emoticons.md` | verified | `ThumbnailCache`、Coil 3.4；Android 冷/热打开、滚动内存和 GIF 双帧验收 |
+| IMAGE-002 | 缩略图使用有界内存/磁盘缓存、并发去重和平台动画解码器加速 | `management/emoticons.md` | verified | `ThumbnailCache`、Coil 3.4；图片路径解析不等待 Git 同步仓库锁；Android 冷/热打开、滚动内存和 GIF 双帧验收 |
 | MANAGE-001 | 管理领域层支持单个和批量导入、删除、移动表情 | `management/emoticons.md` | verified | `EmoticonRepository`、`EmoticonRepositoryTest` |
 | MANAGE-002 | 删除和移动同步更新本设备最近使用记录 | `management/emoticons.md` | implemented | `EmoRepoState.deleteEmoticons`、`moveEmoticons` |
 | MANAGE-003 | 从多选框长按后拖动，按视觉顺序连续选择起点到终点 | `management/emoticons.md` | implemented | `PackManagerScreen` 使用 `detectDragGesturesAfterLongPress`、`RangeSelectionTest`；滚动与长按拖选真机验收待完成 |
@@ -60,5 +60,5 @@
 | STORE-002 | 单文件刷新、替换和中断恢复 | `management/persistence.md` | verified | `AtomicFileStore`、`AtomicFileStoreTest` |
 | STORE-003 | 图片和多个索引之间使用可恢复事务日志 | `management/persistence.md` | confirmed | — |
 | RELEASE-001 | 普通提交构建可调试 dev 渠道并只上传 Actions Artifact | `release/ci-and-updates.md` | verified | `android-dev.yml`、`collect-apks.sh`；run `33034944943` 的五 APK Artifact、SHA-256、dev 包名/版本/调试状态和持久签名验收 |
-| RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | verified | `android-release.yml`；`v0.1.0` run `33035704550`、五个签名 APK 和 GitHub Release 独立下载验收 |
-| RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `generate-release-index.sh`；`release-index.json` 的 tag/commit/版本/五 ABI/尺寸/SHA-256/证书/下载地址独立验收 |
+| RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | verified | `android-release.yml`；`v0.2.0` run `33271388945`、五个签名 APK 和 GitHub Release 独立下载验收 |
+| RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `v0.2.0` `release-index.json` 的 tag/commit/版本/五 ABI/尺寸/SHA-256/证书/下载地址独立验收 |

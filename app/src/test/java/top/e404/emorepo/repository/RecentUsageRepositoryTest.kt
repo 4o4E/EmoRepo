@@ -127,6 +127,16 @@ class RecentUsageRepositoryTest {
     }
 
     @Test
+    fun deviceIdAcceptsAnySafePathSegmentWithoutExtraPatternLimit() {
+        val deviceId = "主力手机 2026.08-" + "a".repeat(64)
+        val repository = repository(deviceId = deviceId)
+
+        repository.recordUse("cats", "a.png", 10)
+
+        assertTrue(File(temporaryFolder.root, "repository/recent/$deviceId.csv").isFile)
+    }
+
+    @Test
     fun generatedDeviceIdUsesConfirmedShape() {
         val deterministic = object : SecureRandom() {
             override fun nextBytes(bytes: ByteArray) {

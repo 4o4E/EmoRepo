@@ -2,6 +2,11 @@ package top.e404.emorepo.repository
 
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
+import kotlin.concurrent.withLock
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -241,6 +246,33 @@ class EmoticonRepositoryTest {
 
         assertEquals(listOf(first.md5, second.md5), reordered.map { it.md5 })
         assertEquals(setOf(first, second), reordered.toSet())
+    }
+
+    @Test
+    fun imagePathResolutionDoesNotWaitForRepositoryMutationLock() {
+        createLegacyPack("cats")
+        val repositoryRoot = File(temporaryFolder.root, "repository")
+        val repository = EmoticonRepository(repositoryRoot)
+        val lockAcquired = CountDownLatch(1)
+        val releaseLock = CountDownLatch(1)
+        val lockHolder = thread {
+            RepositoryLocks.forRoot(repositoryRoot).withLock {
+                lockAcquired.countDown()
+                releaseLock.await(5, TimeUnit.SECONDS)
+            }
+        }
+        assertTrue(lockAcquired.await(1, TimeUnit.SECONDS))
+
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val resolved = executor.submit<File> { repository.imageFile("cats", "cat.png") }
+                .get(1, TimeUnit.SECONDS)
+            assertEquals(File(repositoryRoot, "cats/cat.png").canonicalFile, resolved)
+        } finally {
+            releaseLock.countDown()
+            executor.shutdownNow()
+            lockHolder.join(1_000)
+        }
     }
 
     private fun repository(): EmoticonRepository = EmoticonRepository(
