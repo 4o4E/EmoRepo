@@ -1,32 +1,28 @@
 package top.e404.emorepo.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,14 +43,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import top.e404.emorepo.R
 import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.repository.EmoticonPack
 import top.e404.emorepo.ui.selection.selectContinuousRange
 import top.e404.emorepo.ui.selection.toggleSelection
+
+private const val ADD_EMOTICON_KEY = "\u0000add-emoticon"
 
 @Composable
 fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit) {
@@ -64,100 +60,75 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
         return
     }
 
+    var editing by rememberSaveable(packName) { mutableStateOf(false) }
+    var originalOrder by remember(packName) { mutableStateOf(emptyList<String>()) }
+    var draftOrder by remember(packName) { mutableStateOf(emptyList<String>()) }
     var selectedNames by rememberSaveable(packName) { mutableStateOf(emptyList<String>()) }
-    val selected = selectedNames.toSet()
-    var selectionMode by rememberSaveable(packName) { mutableStateOf(false) }
     var deleteDialog by rememberSaveable(packName) { mutableStateOf(false) }
-    var moveDialog by rememberSaveable(packName) { mutableStateOf(false) }
     var pendingImport by remember { mutableStateOf<PendingImport?>(null) }
-    val orderedRecords = remember(pack.records) {
-        pack.records
-    }
     var previewPage by remember { mutableStateOf<Int?>(null) }
+    val selected = selectedNames.toSet()
+    val recordsByMd5 = pack.records.associateBy { it.md5 }
+    val displayedRecords = if (editing) draftOrder.mapNotNull(recordsByMd5::get) else pack.records
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) pendingImport = PendingImport(packName, uris)
     }
 
+    fun enterEditing() {
+        originalOrder = pack.records.map { it.md5 }
+        draftOrder = originalOrder
+        selectedNames = emptyList()
+        editing = true
+    }
+
+    fun cancelEditing() {
+        editing = false
+        originalOrder = emptyList()
+        draftOrder = emptyList()
+        selectedNames = emptyList()
+    }
+
+    BackHandler(enabled = editing, onBack = ::cancelEditing)
+
     PackManager(
         pack = pack,
         state = state,
+        records = displayedRecords,
         selected = selected,
-        selectionMode = selectionMode,
-        onBack = onBack,
-        onSelectionChange = { selectedNames = it.toList() },
-        onEnterSelection = { selectionMode = true },
-        onExitSelection = {
-            selectionMode = false
-            selectedNames = emptyList()
+        editing = editing,
+        onBack = { if (editing) cancelEditing() else onBack() },
+        onEdit = ::enterEditing,
+        onComplete = {
+            state.applyPackEdit(
+                packName = packName,
+                originalMd5Order = originalOrder,
+                finalMd5Order = draftOrder,
+                onSuccess = ::cancelEditing,
+            )
         },
-        onPreview = { record -> previewPage = orderedRecords.indexOfFirst { it.md5 == record.md5 } },
+        onSelectionChange = { selectedNames = it.toList() },
+        onPreview = { record -> previewPage = pack.records.indexOfFirst { it.md5 == record.md5 } },
         onImport = { importLauncher.launch(arrayOf("image/*")) },
         onDelete = { deleteDialog = true },
-        onMove = { moveDialog = true },
-        onSetIcon = {
-            val md5 = selected.singleOrNull() ?: return@PackManager
-            state.manage(
-                operation = { setIcon(packName, md5); "已设置封面" },
-                onComplete = { selectedNames = emptyList() },
-            )
-        },
-        onClearIcon = {
-            state.manage(
-                operation = { setIcon(packName, null); "已清空封面" },
-                onComplete = { selectedNames = emptyList() },
-            )
-        },
-        onMoveOrder = { offset ->
-            val md5 = selected.singleOrNull() ?: return@PackManager
-            state.manage(
-                operation = {
-                    val order = pack.records.map { it.md5 }.toMutableList()
-                    val oldIndex = order.indexOf(md5)
-                    val newIndex = (oldIndex + offset).coerceIn(0, order.lastIndex)
-                    if (oldIndex != newIndex) {
-                        order.removeAt(oldIndex)
-                        order.add(newIndex, md5)
-                        reorder(packName, order)
-                    }
-                    "顺序已更新"
-                },
-                onComplete = { selectedNames = emptyList() },
-            )
+        onMoveToFront = {
+            draftOrder = moveSelectedToFront(draftOrder, selected)
+            selectedNames = emptyList()
         },
     )
 
     if (deleteDialog) {
         AlertDialog(
             onDismissRequest = { deleteDialog = false },
-            title = { Text("删除 ${selected.size} 个表情？") },
-            text = { Text("图片和索引记录都会从仓库删除，后续 Git 同步会上传本次删除。") },
+            title = { Text("从编辑草稿删除 ${selected.size} 个表情？") },
+            text = { Text("点击右上角“完成”后才会删除原文件；返回将放弃本次删除。") },
             confirmButton = {
                 TextButton(onClick = {
                     deleteDialog = false
-                    state.deleteEmoticons(
-                        packName = packName,
-                        md5Values = selected.toList(),
-                        onComplete = { selectedNames = emptyList() },
-                    )
+                    draftOrder = draftOrder.filterNot { it in selected }
+                    selectedNames = emptyList()
                 }) { Text("删除") }
             },
             dismissButton = { TextButton(onClick = { deleteDialog = false }) { Text("取消") } },
-        )
-    }
-    if (moveDialog) {
-        MoveDialog(
-            targets = state.packs.filterNot { it.name == packName },
-            count = selected.size,
-            onDismiss = { moveDialog = false },
-            onMove = { target ->
-                moveDialog = false
-                state.moveEmoticons(
-                    sourcePackName = packName,
-                    targetPackName = target,
-                    md5Values = selected.toList(),
-                    onComplete = { selectedNames = emptyList() },
-                )
-            },
         )
     }
     pendingImport?.let { pending ->
@@ -165,7 +136,7 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
             pending = pending,
             onConfirm = {
                 pendingImport = null
-                state.importUris(pending.packName, pending.uris) { selectedNames = emptyList() }
+                state.importUris(pending.packName, pending.uris)
             },
             onDismiss = { pendingImport = null },
         )
@@ -174,7 +145,7 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
         FullScreenPreview(
             state = state,
             packName = packName,
-            records = orderedRecords,
+            records = pack.records,
             initialPage = page,
             onDismiss = { previewPage = null },
         )
@@ -185,24 +156,19 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
 private fun PackManager(
     pack: EmoticonPack,
     state: EmoRepoState,
+    records: List<EmoticonRecord>,
     selected: Set<String>,
-    selectionMode: Boolean,
+    editing: Boolean,
     onBack: () -> Unit,
+    onEdit: () -> Unit,
+    onComplete: () -> Unit,
     onSelectionChange: (Set<String>) -> Unit,
-    onEnterSelection: () -> Unit,
-    onExitSelection: () -> Unit,
     onPreview: (EmoticonRecord) -> Unit,
     onImport: () -> Unit,
     onDelete: () -> Unit,
-    onMove: () -> Unit,
-    onSetIcon: () -> Unit,
-    onClearIcon: () -> Unit,
-    onMoveOrder: (Int) -> Unit,
+    onMoveToFront: () -> Unit,
 ) {
-    val ordered = remember(pack.records) {
-        pack.records
-    }
-    val orderedIds = remember(ordered) { ordered.map { it.md5 } }
+    val orderedIds = remember(records) { records.map { it.md5 } }
     val bounds = remember(pack.name) { mutableStateMapOf<String, Rect>() }
     var dragStart by remember(pack.name) { mutableStateOf<Int?>(null) }
     var dragBase by remember(pack.name) { mutableStateOf(emptySet<String>()) }
@@ -220,12 +186,12 @@ private fun PackManager(
     }
 
     fun indexAt(position: Offset): Int? {
-        val direct = ordered.indexOfFirst { record -> bounds[record.md5]?.contains(position) == true }
+        val direct = records.indexOfFirst { record -> bounds[record.md5]?.contains(position) == true }
         if (direct >= 0) return direct
-        return ordered.indices
-            .filter { bounds.containsKey(ordered[it].md5) }
+        return records.indices
+            .filter { bounds.containsKey(records[it].md5) }
             .minByOrNull { index ->
-                val center = bounds.getValue(ordered[index].md5).center
+                val center = bounds.getValue(records[index].md5).center
                 val dx = center.x - position.x
                 val dy = center.y - position.y
                 dx * dx + dy * dy
@@ -244,35 +210,22 @@ private fun PackManager(
                 maxLines = 1,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(
+                onClick = if (editing) onComplete else onEdit,
+                enabled = !state.busy,
+            ) {
+                Text(if (editing) "完成" else "编辑")
+            }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Button(onClick = onImport) { Text("导入") }
-            IconButton(onClick = if (selectionMode) onExitSelection else onEnterSelection) {
-                Icon(
-                    painter = painterResource(
-                        if (selectionMode) R.drawable.ic_close else R.drawable.ic_select_multiple,
-                    ),
-                    contentDescription = if (selectionMode) "退出多选" else "进入多选",
-                )
-            }
-            if (selectionMode) {
-                Text("已选 ${selected.size}")
-            }
-            if (selectionMode && selected.isNotEmpty()) {
-                TextButton(onClick = onMove) { Text("移动") }
-                TextButton(onClick = onDelete) { Text("删除") }
-            }
-            if (selectionMode && selected.size == 1) {
-                TextButton(onClick = onSetIcon) { Text("设为封面") }
-                TextButton(onClick = { onMoveOrder(-1) }) { Text("前移") }
-                TextButton(onClick = { onMoveOrder(1) }) { Text("后移") }
-            }
-            if (pack.records.any { it.icon }) {
-                TextButton(onClick = onClearIcon) { Text("清空封面") }
+        if (editing) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("已选 ${selected.size}", modifier = Modifier.weight(1f))
+                TextButton(onClick = onMoveToFront, enabled = selected.isNotEmpty()) { Text("移动到开头") }
+                TextButton(onClick = onDelete, enabled = selected.isNotEmpty()) { Text("删除") }
             }
         }
         LazyVerticalGrid(
@@ -281,15 +234,25 @@ private fun PackManager(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            itemsIndexed(ordered, key = { _, record -> record.md5 }) { index, record ->
+            if (!editing) {
+                item(key = ADD_EMOTICON_KEY) {
+                    Card(
+                        onClick = onImport,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("＋", style = MaterialTheme.typography.displaySmall)
+                        }
+                    }
+                }
+            }
+            itemsIndexed(records, key = { _, record -> record.md5 }) { index, record ->
                 val isSelected = record.md5 in selected
                 Card(
                     onClick = {
-                        if (selectionMode) {
-                            onSelectionChange(toggleSelection(selected, record.md5))
-                        } else {
-                            onPreview(record)
-                        }
+                        if (editing) onSelectionChange(toggleSelection(selected, record.md5))
+                        else onPreview(record)
                     },
                     modifier = Modifier.onGloballyPositioned { coordinates ->
                         bounds[record.md5] = coordinates.boundsInRoot()
@@ -300,9 +263,7 @@ private fun PackManager(
                                 color = MaterialTheme.colorScheme.primary,
                                 shape = MaterialTheme.shapes.medium,
                             )
-                        } else {
-                            Modifier
-                        },
+                        } else Modifier,
                     ),
                     colors = CardDefaults.cardColors(containerColor = Color.Transparent),
                 ) {
@@ -315,12 +276,10 @@ private fun PackManager(
                             contentDescription = record.name,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        if (selectionMode) {
+                        if (editing) {
                             DragSelectionCheckbox(
                                 checked = isSelected,
-                                onToggle = {
-                                    onSelectionChange(toggleSelection(selected, record.md5))
-                                },
+                                onToggle = { onSelectionChange(toggleSelection(selected, record.md5)) },
                                 onDragStart = { rootPosition ->
                                     dragStart = index
                                     dragBase = selected
@@ -340,6 +299,9 @@ private fun PackManager(
         }
     }
 }
+
+internal fun moveSelectedToFront(order: List<String>, selected: Set<String>): List<String> =
+    order.filter(selected::contains) + order.filterNot(selected::contains)
 
 @Composable
 private fun DragSelectionCheckbox(
@@ -361,9 +323,7 @@ private fun DragSelectionCheckbox(
             .onGloballyPositioned { coordinates = it }
             .pointerInput(Unit) {
                 detectDragGesturesAfterLongPress(
-                    onDragStart = { local ->
-                        coordinates?.localToRoot(local)?.let(currentDragStart)
-                    },
+                    onDragStart = { local -> coordinates?.localToRoot(local)?.let(currentDragStart) },
                     onDrag = { change, _ ->
                         coordinates?.localToRoot(change.position)?.let(currentDrag)
                         change.consume()
@@ -381,32 +341,4 @@ private fun DragSelectionCheckbox(
     ) {
         Checkbox(checked = checked, onCheckedChange = null)
     }
-}
-
-@Composable
-private fun MoveDialog(
-    targets: List<EmoticonPack>,
-    count: Int,
-    onDismiss: () -> Unit,
-    onMove: (String) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("移动 $count 个表情") },
-        text = {
-            if (targets.isEmpty()) {
-                Text("没有其他表情包")
-            } else {
-                Column {
-                    targets.forEach { pack ->
-                        TextButton(onClick = { onMove(pack.name) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(pack.name)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
 }

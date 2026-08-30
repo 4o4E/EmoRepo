@@ -54,6 +54,7 @@ object EmoRepoIpcContract {
     const val COLUMN_SOURCE_PACK_ID = "source_pack_id"
     const val COLUMN_PANEL_COLUMNS = "panel_columns"
     const val COLUMN_WRITABLE = "writable"
+    const val COLUMN_COLLAPSED = "collapsed"
 
     const val QUERY_OFFSET = "offset"
     const val QUERY_LIMIT = "limit"

@@ -41,6 +41,7 @@ internal object QqPanelRepository {
             val coverPack = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COVER_PACK_ID)
             val count = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_ITEM_COUNT)
             val writable = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_WRITABLE)
+            val collapsed = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COLLAPSED)
             buildList {
                 while (cursor.moveToNext()) {
                     add(
@@ -51,6 +52,7 @@ internal object QqPanelRepository {
                             coverPackId = cursor.getString(coverPack),
                             itemCount = cursor.getInt(count),
                             writable = cursor.getInt(writable) != 0,
+                            collapsed = cursor.getInt(collapsed) != 0,
                         ),
                     )
                 }
@@ -156,6 +158,7 @@ internal data class PanelPack(
     val coverPackId: String?,
     val itemCount: Int,
     val writable: Boolean,
+    val collapsed: Boolean,
 )
 
 internal data class PanelItem(

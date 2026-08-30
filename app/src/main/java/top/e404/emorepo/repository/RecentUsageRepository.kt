@@ -103,6 +103,29 @@ class RecentUsageRepository(
         RecentUsageRepository(root, newDeviceId, maximumRecords)
     }
 
+    fun renamePackageAcrossDevices(oldPackageName: String, newPackageName: String) = lock.withLock {
+        recentFiles().forEach { file ->
+            val current = readDeviceFile(file)
+            val updated = current.map { record ->
+                if (record.packageName == oldPackageName) record.copy(packageName = newPackageName) else record
+            }
+            if (updated != current) writeDeviceFile(file, RecentCsvCodec.merge(updated))
+        }
+    }
+
+    fun removePackageAcrossDevices(packageName: String) = lock.withLock {
+        recentFiles().forEach { file ->
+            val current = readDeviceFile(file)
+            val updated = current.filterNot { it.packageName == packageName }
+            if (updated != current) writeDeviceFile(file, updated)
+        }
+    }
+
+    private fun recentFiles(): List<File> = recentDirectory.listFiles()
+        .orEmpty()
+        .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
+        .sortedBy { it.name }
+
     private fun readDeviceFile(file: File): List<RecentUsageRecord> {
         AtomicFileStore.recover(file)
         if (!file.exists()) return emptyList()

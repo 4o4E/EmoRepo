@@ -1,11 +1,10 @@
 package top.e404.emorepo.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -22,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -31,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
@@ -56,22 +57,34 @@ import androidx.compose.ui.unit.dp
 import top.e404.emorepo.R
 import top.e404.emorepo.repository.EmoticonPack
 import top.e404.emorepo.repository.EmoticonRepository
+import top.e404.emorepo.protocol.pack.PackIndexRecord
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
 enum class PackLayout { LIST, GRID }
 
+private const val COLLAPSED_HEADER_KEY = "\u0000collapsed-packs-header"
+private const val CREATE_PACK_KEY = "\u0000create-pack"
+
 @Composable
 fun PackListScreen(
     state: EmoRepoState,
+    onOpenSettings: () -> Unit,
     onOpenPack: (String) -> Unit,
 ) {
-    var draftOrder by remember { mutableStateOf<List<String>?>(null) }
-    val displayedPacks = draftOrder?.mapNotNull { name -> state.packs.firstOrNull { it.name == name } }
+    var draftArrangement by remember { mutableStateOf<List<PackIndexRecord>?>(null) }
+    var collapsedExpanded by rememberSaveable { mutableStateOf(false) }
+    var menuPack by remember { mutableStateOf<EmoticonPack?>(null) }
+    var renamePack by remember { mutableStateOf<EmoticonPack?>(null) }
+    var deletePack by remember { mutableStateOf<EmoticonPack?>(null) }
+    var createPackDialog by rememberSaveable { mutableStateOf(false) }
+    val displayedPacks = draftArrangement?.mapNotNull { record ->
+        state.packs.firstOrNull { it.name == record.name }?.copy(collapsed = record.collapsed)
+    }
         ?.takeIf { it.size == state.packs.size }
         ?: state.packs
-    BackHandler(enabled = draftOrder != null) { draftOrder = null }
+    BackHandler(enabled = draftArrangement != null) { draftArrangement = null }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp)) {
         if (!state.repositoryConfigured) {
@@ -83,8 +96,14 @@ fun PackListScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_menu),
+                    contentDescription = "打开软件设置",
+                )
+            }
             Text(
-                if (draftOrder == null) {
+                if (draftArrangement == null) {
                     "共 ${state.packs.size} 个表情包，${state.packs.sumOf { it.records.size }} 张表情"
                 } else {
                     "排序模式：拖动表情包调整顺序"
@@ -92,44 +111,111 @@ fun PackListScreen(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
-            if (draftOrder == null) {
+            if (draftArrangement == null) {
                 PackLayoutSelector(
                     selected = state.packLayout,
                     onSelect = state::updatePackLayout,
                 )
             } else {
-                TextButton(onClick = { draftOrder = null }) { Text("取消") }
+                TextButton(onClick = { draftArrangement = null }) { Text("取消") }
                 Button(
                     onClick = {
-                        val names = draftOrder.orEmpty()
-                        if (names.isNotEmpty()) state.reorderPacks(names)
-                        draftOrder = null
+                        val records = draftArrangement.orEmpty()
+                        if (records.isNotEmpty()) {
+                            state.updatePackArrangement(records) { draftArrangement = null }
+                        }
                     },
+                    enabled = !state.busy,
                 ) { Text("完成") }
             }
         }
         Spacer(Modifier.height(4.dp))
 
-        if (state.packs.isEmpty()) {
-            Text("暂无表情包")
-        } else {
-            PackCollection(
+        PackCollection(
                 packs = displayedPacks,
                 repository = state.repository,
                 layout = state.packLayout,
                 onPackClick = onOpenPack,
-                reorderable = true,
-                editing = draftOrder != null,
+                reorderable = draftArrangement != null,
+                editing = draftArrangement != null,
+                showCreateItem = draftArrangement == null,
+                onCreateItem = { createPackDialog = true },
+                collapsedExpanded = collapsedExpanded,
+                onCollapsedExpandedChange = { collapsedExpanded = it },
                 onDragStarted = {
-                    if (draftOrder == null) draftOrder = state.packs.map { it.name }
+                    if (draftArrangement == null) {
+                        draftArrangement = state.packs.map { PackIndexRecord(it.name, it.collapsed) }
+                    }
                 },
-                onMove = { from, to ->
-                    val current = draftOrder ?: state.packs.map { it.name }
-                    draftOrder = movePackItem(current, from, to)
+                onMove = { fromName, toName ->
+                    val current = draftArrangement
+                        ?: state.packs.map { PackIndexRecord(it.name, it.collapsed) }
+                    draftArrangement = movePackItemByName(current, fromName, toName)
                 },
+                onToggleCollapsed = { name ->
+                    val current = draftArrangement
+                        ?: state.packs.map { PackIndexRecord(it.name, it.collapsed) }
+                    draftArrangement = current.map { record ->
+                        if (record.name == name) record.copy(collapsed = !record.collapsed) else record
+                    }
+                },
+                onPackLongClick = { name -> menuPack = state.packs.firstOrNull { it.name == name } },
                 modifier = Modifier.weight(1f),
-            )
-        }
+        )
+    }
+
+    menuPack?.let { pack ->
+        AlertDialog(
+            onDismissRequest = { menuPack = null },
+            title = { Text(pack.name) },
+            text = {
+                Column {
+                    TextButton(onClick = { menuPack = null; renamePack = pack }) { Text("重命名") }
+                    TextButton(onClick = { menuPack = null; deletePack = pack }) { Text("删除") }
+                    TextButton(
+                        onClick = {
+                            menuPack = null
+                            draftArrangement = state.packs.map { PackIndexRecord(it.name, it.collapsed) }
+                        },
+                    ) { Text("进入编辑") }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+    renamePack?.let { pack ->
+        PackNameDialog(
+            title = "重命名表情包",
+            initialName = pack.name,
+            confirmLabel = "重命名",
+            onDismiss = { renamePack = null },
+            onConfirm = { newName ->
+                renamePack = null
+                state.renamePack(pack.name, newName)
+            },
+        )
+    }
+    deletePack?.let { pack ->
+        AlertDialog(
+            onDismissRequest = { deletePack = null },
+            title = { Text("删除表情包？") },
+            text = { Text("将删除“${pack.name}”及其中 ${pack.records.size} 张表情，此操作会同步到 Git 仓库。") },
+            confirmButton = {
+                TextButton(onClick = { deletePack = null; state.deletePack(pack.name) }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { deletePack = null }) { Text("取消") } },
+        )
+    }
+    if (createPackDialog) {
+        PackNameDialog(
+            title = "新建表情包",
+            confirmLabel = "创建",
+            onDismiss = { createPackDialog = false },
+            onConfirm = { name ->
+                createPackDialog = false
+                state.manage(operation = { createPack(name); "已创建表情包 $name" })
+            },
+        )
     }
 }
 
@@ -174,10 +260,18 @@ private fun PackCollection(
     selectedPack: String? = null,
     reorderable: Boolean = false,
     editing: Boolean = false,
+    showCreateItem: Boolean = false,
+    onCreateItem: () -> Unit = {},
+    collapsedExpanded: Boolean = false,
+    onCollapsedExpandedChange: (Boolean) -> Unit = {},
     onDragStarted: () -> Unit = {},
-    onMove: (Int, Int) -> Unit = { _, _ -> },
+    onMove: (String, String) -> Unit = { _, _ -> },
+    onToggleCollapsed: (String) -> Unit = {},
+    onPackLongClick: (String) -> Unit = {},
 ) {
     val haptics = LocalHapticFeedback.current
+    val normalPacks = packs.filterNot { it.collapsed }
+    val collapsedPacks = packs.filter { it.collapsed }
 
     fun dragStarted() {
         onDragStarted()
@@ -196,22 +290,52 @@ private fun PackCollection(
                 state = listState,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(packs, key = { it.name }) { pack ->
-                    PackListCard(pack, repository, selectedPack == pack.name) {
-                        onPackClick(pack.name)
+                if (showCreateItem) {
+                    item(key = CREATE_PACK_KEY) { CreatePackListCard(onCreateItem) }
+                }
+                items(normalPacks, key = { it.name }) { pack ->
+                    PackListCard(
+                        pack = pack,
+                        repository = repository,
+                        selected = selectedPack == pack.name,
+                        onLongClick = { onPackLongClick(pack.name) },
+                        onClick = { onPackClick(pack.name) },
+                    )
+                }
+                if (collapsedPacks.isNotEmpty()) {
+                    item(key = COLLAPSED_HEADER_KEY) {
+                        CollapsedPacksHeader(
+                            count = collapsedPacks.size,
+                            expanded = collapsedExpanded,
+                            onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
+                        )
+                    }
+                    if (collapsedExpanded) {
+                        items(collapsedPacks, key = { it.name }) { pack ->
+                            PackListCard(
+                                pack = pack,
+                                repository = repository,
+                                selected = selectedPack == pack.name,
+                                onLongClick = { onPackLongClick(pack.name) },
+                                onClick = { onPackClick(pack.name) },
+                            )
+                        }
                     }
                 }
             }
         } else {
             val reorderState = rememberReorderableLazyListState(listState) { from, to ->
-                onMove(from.index, to.index)
+                val fromName = from.key as? String
+                val toName = to.key as? String
+                if (fromName != null && toName != null) onMove(fromName, toName)
             }
             LazyColumn(
                 modifier = modifier,
                 state = listState,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(packs, key = { it.name }) { pack ->
+                val leadingPacks = if (editing) packs else normalPacks
+                items(leadingPacks, key = { it.name }) { pack ->
                     ReorderableItem(reorderState, key = pack.name) { isDragging ->
                         val dragModifier = if (editing) {
                             Modifier.draggableHandle(
@@ -229,9 +353,37 @@ private fun PackCollection(
                             repository = repository,
                             selected = false,
                             isDragging = isDragging,
+                            editing = editing,
                             modifier = dragModifier,
                             onClick = { if (!editing) onPackClick(pack.name) },
+                            onToggleCollapsed = { onToggleCollapsed(pack.name) },
                         )
+                    }
+                }
+                if (!editing && collapsedPacks.isNotEmpty()) {
+                    item(key = COLLAPSED_HEADER_KEY) {
+                        CollapsedPacksHeader(
+                            count = collapsedPacks.size,
+                            expanded = collapsedExpanded,
+                            onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
+                        )
+                    }
+                    if (collapsedExpanded) {
+                        items(collapsedPacks, key = { it.name }) { pack ->
+                            ReorderableItem(reorderState, key = pack.name) { isDragging ->
+                                PackListCard(
+                                    pack = pack,
+                                    repository = repository,
+                                    selected = false,
+                                    isDragging = isDragging,
+                                    modifier = Modifier.longPressDraggableHandle(
+                                        onDragStarted = { dragStarted() },
+                                        onDragStopped = { dragStopped() },
+                                    ),
+                                    onClick = { onPackClick(pack.name) },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -246,15 +398,47 @@ private fun PackCollection(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(packs, key = { it.name }) { pack ->
-                    PackGridCard(pack, repository, selectedPack == pack.name) {
-                        onPackClick(pack.name)
+                if (showCreateItem) {
+                    item(key = CREATE_PACK_KEY) { CreatePackGridCard(onCreateItem) }
+                }
+                items(normalPacks, key = { it.name }) { pack ->
+                    PackGridCard(
+                        pack = pack,
+                        repository = repository,
+                        selected = selectedPack == pack.name,
+                        onLongClick = { onPackLongClick(pack.name) },
+                        onClick = { onPackClick(pack.name) },
+                    )
+                }
+                if (collapsedPacks.isNotEmpty()) {
+                    item(
+                        key = COLLAPSED_HEADER_KEY,
+                        span = { GridItemSpan(maxLineSpan) },
+                    ) {
+                        CollapsedPacksHeader(
+                            count = collapsedPacks.size,
+                            expanded = collapsedExpanded,
+                            onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
+                        )
+                    }
+                    if (collapsedExpanded) {
+                        items(collapsedPacks, key = { it.name }) { pack ->
+                            PackGridCard(
+                                pack = pack,
+                                repository = repository,
+                                selected = selectedPack == pack.name,
+                                onLongClick = { onPackLongClick(pack.name) },
+                                onClick = { onPackClick(pack.name) },
+                            )
+                        }
                     }
                 }
             }
         } else {
             val reorderState = rememberReorderableLazyGridState(gridState) { from, to ->
-                onMove(from.index, to.index)
+                val fromName = from.key as? String
+                val toName = to.key as? String
+                if (fromName != null && toName != null) onMove(fromName, toName)
             }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
@@ -263,7 +447,8 @@ private fun PackCollection(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(packs, key = { it.name }) { pack ->
+                val leadingPacks = if (editing) packs else normalPacks
+                items(leadingPacks, key = { it.name }) { pack ->
                     ReorderableItem(reorderState, key = pack.name) { isDragging ->
                         val dragModifier = if (editing) {
                             Modifier.draggableHandle(
@@ -281,9 +466,40 @@ private fun PackCollection(
                             repository = repository,
                             selected = false,
                             isDragging = isDragging,
+                            editing = editing,
                             modifier = dragModifier,
                             onClick = { if (!editing) onPackClick(pack.name) },
+                            onToggleCollapsed = { onToggleCollapsed(pack.name) },
                         )
+                    }
+                }
+                if (!editing && collapsedPacks.isNotEmpty()) {
+                    item(
+                        key = COLLAPSED_HEADER_KEY,
+                        span = { GridItemSpan(maxLineSpan) },
+                    ) {
+                        CollapsedPacksHeader(
+                            count = collapsedPacks.size,
+                            expanded = collapsedExpanded,
+                            onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
+                        )
+                    }
+                    if (collapsedExpanded) {
+                        items(collapsedPacks, key = { it.name }) { pack ->
+                            ReorderableItem(reorderState, key = pack.name) { isDragging ->
+                                PackGridCard(
+                                    pack = pack,
+                                    repository = repository,
+                                    selected = false,
+                                    isDragging = isDragging,
+                                    modifier = Modifier.longPressDraggableHandle(
+                                        onDragStarted = { dragStarted() },
+                                        onDragStopped = { dragStopped() },
+                                    ),
+                                    onClick = { onPackClick(pack.name) },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -298,12 +514,14 @@ private fun PackListCard(
     selected: Boolean,
     modifier: Modifier = Modifier,
     isDragging: Boolean = false,
+    editing: Boolean = false,
+    onToggleCollapsed: () -> Unit = {},
+    onLongClick: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val elevation by animateDpAsState(if (isDragging) 8.dp else 0.dp, label = "pack-list-elevation")
     Card(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
             else MaterialTheme.colorScheme.surfaceVariant,
@@ -328,6 +546,12 @@ private fun PackListCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text("${pack.records.size} 个", style = MaterialTheme.typography.bodySmall)
+                if (editing) {
+                    TextButton(
+                        onClick = onToggleCollapsed,
+                        contentPadding = PaddingValues(horizontal = 6.dp),
+                    ) { Text(if (pack.collapsed) "取消折叠" else "折叠") }
+                }
             }
         }
     }
@@ -340,41 +564,109 @@ private fun PackGridCard(
     selected: Boolean,
     modifier: Modifier = Modifier,
     isDragging: Boolean = false,
+    editing: Boolean = false,
+    onToggleCollapsed: () -> Unit = {},
+    onLongClick: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val elevation by animateDpAsState(if (isDragging) 8.dp else 0.dp, label = "pack-grid-elevation")
     Card(
-        onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
         border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            PackCover(pack, repository, Modifier.fillMaxWidth().aspectRatio(1f))
-            Row(
-                modifier = Modifier.fillMaxWidth()
-                    .background(
-                        if (selected) MaterialTheme.colorScheme.primary
-                        else Color.Black.copy(alpha = 0.72f),
+        Box {
+            Column(Modifier.fillMaxWidth()) {
+                PackCover(pack, repository, Modifier.fillMaxWidth().aspectRatio(1f))
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary
+                            else Color.Black.copy(alpha = 0.72f),
+                        )
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        pack.name,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    pack.name,
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    "${pack.records.size} 个",
-                    color = Color.White.copy(alpha = 0.78f),
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(start = 4.dp),
-                )
+                    Text(
+                        "${pack.records.size} 个",
+                        color = Color.White.copy(alpha = 0.78f),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
             }
+            if (editing) {
+                TextButton(
+                    onClick = onToggleCollapsed,
+                    modifier = Modifier.align(Alignment.TopEnd).size(36.dp),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Text(
+                        if (pack.collapsed) "展开" else "折叠",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreatePackListCard(onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("＋", style = MaterialTheme.typography.headlineMedium)
+            Text("新建表情包", style = MaterialTheme.typography.titleMedium)
+        }
+    }
+}
+
+@Composable
+private fun CreatePackGridCard(onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("＋", style = MaterialTheme.typography.displaySmall)
+        }
+    }
+}
+
+@Composable
+private fun CollapsedPacksHeader(
+    count: Int,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("已折叠 $count 个表情包", modifier = Modifier.weight(1f))
+            Text(if (expanded) "收起 ▲" else "展开 ▼")
         }
     }
 }
@@ -407,93 +699,6 @@ private fun PackCover(
 }
 
 @Composable
-fun AddEmoticonsScreen(state: EmoRepoState) {
-    var selectedPack by rememberSaveable { mutableStateOf<String?>(null) }
-    var createPackDialog by rememberSaveable { mutableStateOf(false) }
-    var pendingImport by remember { mutableStateOf<PendingImport?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        val target = selectedPack
-        if (target != null && uris.isNotEmpty()) pendingImport = PendingImport(target, uris)
-    }
-
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        if (!state.repositoryConfigured) {
-            UnconfiguredRepositoryCard()
-            return@Column
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "选择目标表情包",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f),
-            )
-            Button(onClick = { createPackDialog = true }) { Text("新建表情包") }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "共 ${state.packs.size} 个表情包",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f),
-            )
-            PackLayoutSelector(
-                selected = state.packLayout,
-                onSelect = state::updatePackLayout,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        if (state.packs.isEmpty()) {
-            Text("暂无表情包", modifier = Modifier.weight(1f))
-        } else {
-            PackCollection(
-                packs = state.packs,
-                repository = state.repository,
-                layout = state.packLayout,
-                onPackClick = { selectedPack = it },
-                selectedPack = selectedPack,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Button(
-            onClick = { launcher.launch(arrayOf("image/*")) },
-            enabled = selectedPack != null,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (selectedPack == null) "先选择表情包" else "选择图片") }
-    }
-
-    if (createPackDialog) {
-        CreatePackDialog(
-            onDismiss = { createPackDialog = false },
-            onCreate = { name ->
-                createPackDialog = false
-                state.manage(
-                    operation = { createPack(name); "已创建表情包 $name" },
-                    onComplete = {
-                        if (state.packs.any { it.name == name }) selectedPack = name
-                    },
-                )
-            },
-        )
-    }
-    pendingImport?.let { pending ->
-        ImportConfirmationDialog(
-            pending = pending,
-            onConfirm = {
-                pendingImport = null
-                state.importUris(pending.packName, pending.uris)
-            },
-            onDismiss = { pendingImport = null },
-        )
-    }
-}
-
-@Composable
 private fun UnconfiguredRepositoryCard() {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
         Column(Modifier.padding(16.dp)) {
@@ -504,11 +709,17 @@ private fun UnconfiguredRepositoryCard() {
 }
 
 @Composable
-private fun CreatePackDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var name by rememberSaveable { mutableStateOf("") }
+private fun PackNameDialog(
+    title: String,
+    initialName: String = "",
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建表情包") },
+        title = { Text(title) },
         text = {
             OutlinedTextField(
                 value = name,
@@ -518,7 +729,7 @@ private fun CreatePackDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) 
             )
         },
         confirmButton = {
-            TextButton(onClick = { onCreate(name.trim()) }, enabled = name.isNotBlank()) { Text("创建") }
+            TextButton(onClick = { onConfirm(name.trim()) }, enabled = name.isNotBlank()) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
@@ -529,4 +740,15 @@ internal fun <T> movePackItem(items: List<T>, fromIndex: Int, toIndex: Int): Lis
     require(toIndex in items.indices) { "toIndex 超出表情包列表范围" }
     if (fromIndex == toIndex) return items
     return items.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
+}
+
+internal fun movePackItemByName(
+    items: List<PackIndexRecord>,
+    fromName: String,
+    toName: String,
+): List<PackIndexRecord> {
+    val fromIndex = items.indexOfFirst { it.name == fromName }
+    val toIndex = items.indexOfFirst { it.name == toName }
+    if (fromIndex < 0 || toIndex < 0) return items
+    return movePackItem(items, fromIndex, toIndex)
 }

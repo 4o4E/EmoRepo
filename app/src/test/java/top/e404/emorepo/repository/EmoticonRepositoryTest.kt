@@ -2,6 +2,7 @@ package top.e404.emorepo.repository
 
 import java.io.File
 import java.security.MessageDigest
+import java.util.Properties
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -16,6 +17,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import top.e404.emorepo.protocol.ProtocolException
+import top.e404.emorepo.protocol.index.IndexJsonlCodec
 import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
 
@@ -65,6 +67,31 @@ class EmoticonRepositoryTest {
         assertEquals(listOf("zeta", "alpha"), reordered.map { it.name })
         assertEquals(
             listOf(PackIndexRecord("zeta"), PackIndexRecord("alpha")),
+            RootIndexJsonlCodec.decode(
+                File(temporaryFolder.root, "repository/index.jsonl").readText(),
+            ),
+        )
+    }
+
+    @Test
+    fun arrangementPersistsUserCollapsedChoiceAndReorderPreservesIt() {
+        createLegacyPack("alpha")
+        createLegacyPack("zeta")
+        val repository = repository()
+        repository.initializePackOrder()
+
+        repository.updatePackArrangement(
+            listOf(PackIndexRecord("alpha", collapsed = true), PackIndexRecord("zeta")),
+        )
+        val reordered = repository.reorderPacks(listOf("zeta", "alpha"))
+        val updatedCollapsedPack = repository.setIcon("alpha", null)
+
+        assertEquals(listOf("zeta", "alpha"), reordered.map { it.name })
+        assertFalse(reordered.first().collapsed)
+        assertTrue(reordered.last().collapsed)
+        assertTrue(updatedCollapsedPack.collapsed)
+        assertEquals(
+            listOf(PackIndexRecord("zeta"), PackIndexRecord("alpha", collapsed = true)),
             RootIndexJsonlCodec.decode(
                 File(temporaryFolder.root, "repository/index.jsonl").readText(),
             ),
@@ -249,6 +276,189 @@ class EmoticonRepositoryTest {
     }
 
     @Test
+    fun renamePackPreservesContentCollapsedStateAndAllRecentFiles() {
+        val repository = repository()
+        repository.createPack("old")
+        val record = repository.import("old", listOf(ImportCandidate("a.png", png(41))))
+            .items.single().record!!
+        repository.updatePackArrangement(listOf(PackIndexRecord("old", collapsed = true)))
+        RecentUsageRepository(File(temporaryFolder.root, "repository"), "phone").recordUse("old", record.name, 20)
+        RecentUsageRepository(File(temporaryFolder.root, "repository"), "tablet").recordUse("old", record.name, 10)
+
+        val renamed = repository.renamePack("old", "新名字")
+
+        assertEquals("新名字", renamed.name)
+        assertTrue(renamed.collapsed)
+        assertTrue(File(temporaryFolder.root, "repository/新名字/${record.name}").isFile)
+        assertFalse(File(temporaryFolder.root, "repository/old").exists())
+        assertEquals(listOf(PackIndexRecord("新名字", collapsed = true)), rootRecords())
+        assertEquals(
+            setOf("新名字"),
+            listOf("phone", "tablet").flatMap { device ->
+                RecentUsageRepository(File(temporaryFolder.root, "repository"), device)
+                    .readCurrentDevice().map { it.packageName }
+            }.toSet(),
+        )
+    }
+
+    @Test
+    fun deletePackRemovesDirectoryRootRecordAndAllRecentReferences() {
+        val repository = repository()
+        repository.createPack("delete-me")
+        val record = repository.import("delete-me", listOf(ImportCandidate("a.png", png(42))))
+            .items.single().record!!
+        RecentUsageRepository(File(temporaryFolder.root, "repository"), "phone")
+            .recordUse("delete-me", record.name, 20)
+
+        val deleted = repository.deletePack("delete-me")
+
+        assertEquals("delete-me", deleted.name)
+        assertFalse(File(temporaryFolder.root, "repository/delete-me").exists())
+        assertTrue(rootRecords().isEmpty())
+        assertTrue(
+            RecentUsageRepository(File(temporaryFolder.root, "repository"), "phone")
+                .readCurrentDevice().isEmpty(),
+        )
+    }
+
+    @Test
+    fun applyPackEditDeletesDraftItemsAndMovesSelectionToFrontOnce() {
+        val repository = repository()
+        repository.createPack("cats")
+        repository.import(
+            "cats",
+            listOf(
+                ImportCandidate("a.png", png(43)),
+                ImportCandidate("b.png", png(44)),
+                ImportCandidate("c.png", png(45)),
+            ),
+        )
+        repository.updatePackArrangement(listOf(PackIndexRecord("cats", collapsed = true)))
+        val original = repository.getPack("cats").records
+        RecentUsageRepository(File(temporaryFolder.root, "repository"), "phone")
+            .recordUse("cats", original[1].name, 20)
+        val finalOrder = listOf(original[2].md5, original[0].md5)
+
+        val edited = repository.applyPackEdit(
+            packName = "cats",
+            originalMd5Order = original.map { it.md5 },
+            finalMd5Order = finalOrder,
+            recentDeviceId = "phone",
+            recentMaximumRecords = 30,
+        )
+
+        assertEquals(finalOrder, edited.records.map { it.md5 })
+        assertTrue(edited.collapsed)
+        assertFalse(File(temporaryFolder.root, "repository/cats/${original[1].name}").exists())
+        assertTrue(
+            RecentUsageRepository(File(temporaryFolder.root, "repository"), "phone")
+                .readCurrentDevice().isEmpty(),
+        )
+    }
+
+    @Test
+    fun interruptedDeleteTransactionRollsBackOnRepositoryOpen() {
+        val repository = repository()
+        repository.createPack("cats")
+        val root = File(temporaryFolder.root, "repository")
+        val rootIndex = File(root, "index.jsonl")
+        val transaction = File(root, ".emorepo-pack-transaction")
+        assertTrue(transaction.mkdir())
+        rootIndex.copyTo(File(transaction, "root-index.backup"))
+        assertTrue(File(root, "cats").renameTo(File(transaction, "pack")))
+        rootIndex.writeText("")
+        File(transaction, "manifest.properties").outputStream().use { output ->
+            Properties().apply {
+                setProperty("operation", "DELETE")
+                setProperty("source", "cats")
+                setProperty("rootExists", "true")
+            }.store(output, null)
+        }
+
+        val recovered = repository()
+
+        assertEquals(listOf("cats"), recovered.listPacks().map { it.name })
+        assertTrue(File(root, "cats/index.jsonl").isFile)
+        assertFalse(transaction.exists())
+    }
+
+    @Test
+    fun interruptedRenameTransactionRestoresDirectoryIndexAndRecentFiles() {
+        val repository = repository()
+        repository.createPack("old")
+        val record = repository.import("old", listOf(ImportCandidate("a.png", png(46))))
+            .items.single().record!!
+        repository.updatePackArrangement(listOf(PackIndexRecord("old", collapsed = true)))
+        val root = File(temporaryFolder.root, "repository")
+        RecentUsageRepository(root, "phone").recordUse("old", record.name, 20)
+        val transaction = File(root, ".emorepo-pack-transaction")
+        assertTrue(transaction.mkdir())
+        File(root, "index.jsonl").copyTo(File(transaction, "root-index.backup"))
+        File(root, "recent").copyRecursively(File(transaction, "recent-backup"))
+        writeTransactionManifest(transaction, "RENAME", "old", "new")
+        assertTrue(File(root, "old").renameTo(File(root, "new")))
+        File(root, "index.jsonl").writeText(RootIndexJsonlCodec.encode(listOf(PackIndexRecord("new", true))))
+        RecentUsageRepository(root, "phone").renamePackageAcrossDevices("old", "new")
+
+        val recovered = repository()
+
+        assertEquals(listOf(PackIndexRecord("old", collapsed = true)), rootRecords())
+        assertTrue(File(root, "old/${record.name}").isFile)
+        assertFalse(File(root, "new").exists())
+        assertEquals("old", RecentUsageRepository(root, "phone").readCurrentDevice().single().packageName)
+    }
+
+    @Test
+    fun interruptedPackEditRestoresFilesIndexAndRecentUsage() {
+        val repository = repository()
+        repository.createPack("cats")
+        repository.import(
+            "cats",
+            listOf(ImportCandidate("a.png", png(47)), ImportCandidate("b.png", png(48))),
+        )
+        val root = File(temporaryFolder.root, "repository")
+        val records = repository.getPack("cats").records
+        RecentUsageRepository(root, "phone").recordUse("cats", records[1].name, 20)
+        val transaction = File(root, ".emorepo-pack-transaction")
+        assertTrue(transaction.mkdir())
+        File(root, "index.jsonl").copyTo(File(transaction, "root-index.backup"))
+        File(root, "cats/index.jsonl").copyTo(File(transaction, "pack-index.backup"))
+        File(root, "recent").copyRecursively(File(transaction, "recent-backup"))
+        writeTransactionManifest(transaction, "EDIT", "cats")
+        val deleted = File(transaction, "deleted")
+        assertTrue(deleted.mkdir())
+        assertTrue(File(root, "cats/${records[1].name}").renameTo(File(deleted, records[1].name)))
+        File(root, "cats/index.jsonl").writeText(IndexJsonlCodec.encode(listOf(records[0])))
+        RecentUsageRepository(root, "phone").remove("cats", records[1].name)
+
+        val recovered = repository()
+
+        assertEquals(records.map { it.md5 }, recovered.getPack("cats").records.map { it.md5 })
+        assertTrue(File(root, "cats/${records[1].name}").isFile)
+        assertEquals(records[1].name, RecentUsageRepository(root, "phone").readCurrentDevice().single().name)
+        assertFalse(transaction.exists())
+    }
+
+    @Test
+    fun committedDeleteTransactionIsCleanedWithoutRollbackOnRepositoryOpen() {
+        val repository = repository()
+        repository.createPack("cats")
+        val root = File(temporaryFolder.root, "repository")
+        val rootIndex = File(root, "index.jsonl")
+        val completed = File(root, ".emorepo-pack-transaction.completed")
+        assertTrue(completed.mkdir())
+        rootIndex.copyTo(File(completed, "root-index.backup"))
+        assertTrue(File(root, "cats").renameTo(File(completed, "pack")))
+        rootIndex.writeText("")
+
+        val reopened = repository()
+
+        assertTrue(reopened.listPacks().isEmpty())
+        assertFalse(File(root, "cats").exists())
+        assertFalse(completed.exists())
+    }
+
+    @Test
     fun imagePathResolutionDoesNotWaitForRepositoryMutationLock() {
         createLegacyPack("cats")
         val repositoryRoot = File(temporaryFolder.root, "repository")
@@ -279,6 +489,26 @@ class EmoticonRepositoryTest {
         File(temporaryFolder.root, "repository"),
         currentTimeMillis = { 1000L },
     )
+
+    private fun rootRecords(): List<PackIndexRecord> = RootIndexJsonlCodec.decode(
+        File(temporaryFolder.root, "repository/index.jsonl").readText(),
+    )
+
+    private fun writeTransactionManifest(
+        directory: File,
+        operation: String,
+        source: String,
+        target: String? = null,
+    ) {
+        File(directory, "manifest.properties").outputStream().use { output ->
+            Properties().apply {
+                setProperty("operation", operation)
+                setProperty("source", source)
+                target?.let { setProperty("target", it) }
+                setProperty("rootExists", "true")
+            }.store(output, null)
+        }
+    }
 
     private fun createLegacyPack(name: String) {
         val directory = File(temporaryFolder.root, "repository/$name")

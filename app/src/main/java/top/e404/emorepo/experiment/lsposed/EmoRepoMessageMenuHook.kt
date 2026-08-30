@@ -1,9 +1,7 @@
 package top.e404.emorepo.experiment.lsposed
 
 import android.app.AndroidAppHelper
-import android.app.AlertDialog
 import android.content.Context
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -337,45 +335,18 @@ internal object EmoRepoMessageMenuHook {
         }
     }
 
-    private fun listPacks(context: Context): List<String> {
-        val uri = Uri.Builder()
-            .scheme("content")
-            .authority(EmoRepoIpcContract.AUTHORITY)
-            .appendPath(EmoRepoIpcContract.PATH_PACKS)
-            .build()
-        return context.contentResolver.query(uri, null, null, null, null).use { cursor ->
-            requireNotNull(cursor) { "EmoRepo 未返回表情包" }
-            val idColumn = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_ID)
-            val writableColumn = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_WRITABLE)
-            buildList {
-                while (cursor.moveToNext()) {
-                    if (cursor.getInt(writableColumn) != 0) add(cursor.getString(idColumn))
-                }
+    private fun listPacks(context: Context): List<PanelPack> {
+        return QqPanelRepository.listPacks(context)
+            .filter { pack ->
+                pack.writable && pack.id != EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID
             }
-        }.also { packs -> check(packs.isNotEmpty()) { "EmoRepo 没有可导入的表情包" } }
+            .also { packs -> check(packs.isNotEmpty()) { "EmoRepo 没有可导入的表情包" } }
     }
 
-    private fun showPackChooser(context: Context, packs: List<String>, pictures: List<PictureRef>) {
-        AlertDialog.Builder(context)
-            .setTitle("添加到 EmoRepo")
-            .setItems(packs.toTypedArray()) { _, index ->
-                showImportConfirmation(context, packs[index], pictures)
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun showImportConfirmation(
-        context: Context,
-        packId: String,
-        pictures: List<PictureRef>,
-    ) {
-        AlertDialog.Builder(context)
-            .setTitle("确认导入")
-            .setMessage("将 ${pictures.size} 张图片导入“$packId”？")
-            .setPositiveButton("导入") { _, _ -> importPictures(context, packId, pictures) }
-            .setNegativeButton("取消", null)
-            .show()
+    private fun showPackChooser(context: Context, packs: List<PanelPack>, pictures: List<PictureRef>) {
+        EmoRepoImportDialog.show(context, packs, pictures.size) { packId ->
+            importPictures(context, packId, pictures)
+        }
     }
 
     private fun importPictures(context: Context, packId: String, pictures: List<PictureRef>) {

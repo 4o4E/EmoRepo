@@ -38,6 +38,22 @@ class ProtocolConflictResolverTest {
     }
 
     @Test
+    fun `root index preserves explicit collapsed change from one side`() {
+        val base = listOf(PackIndexRecord("pack"))
+        val local = listOf(PackIndexRecord("pack", collapsed = true))
+        val remote = listOf(PackIndexRecord("pack"))
+
+        val result = ProtocolConflictResolver.resolve(
+            "index.jsonl",
+            RootIndexJsonlCodec.encode(base).bytes(),
+            RootIndexJsonlCodec.encode(local).bytes(),
+            RootIndexJsonlCodec.encode(remote).bytes(),
+        )
+
+        assertTrue(RootIndexJsonlCodec.decode(result.text()).single().collapsed)
+    }
+
+    @Test
     fun `merges different additions with local line order first`() {
         val local = listOf(record("a", 10))
         val remote = listOf(record("b", 20))

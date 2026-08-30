@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.e404.emorepo.config.AppSettings
 import top.e404.emorepo.config.SettingsStore
+import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.config.SetupInput
 import top.e404.emorepo.config.SyncStatus
 import top.e404.emorepo.config.validated
@@ -226,18 +227,35 @@ class EmoRepoState(
     }
 
     fun reorderPacks(names: List<String>) {
-        if (names == packs.map { it.name }) return
         val byName = packs.associateBy { it.name }
         if (names.size != packs.size || names.toSet() != byName.keys) {
             message = "表情包排序数据已变化，请重试"
             return
         }
-        packs = names.map(byName::getValue)
+        updatePackArrangement(names.map { name ->
+            val pack = byName.getValue(name)
+            PackIndexRecord(pack.name, pack.collapsed)
+        })
+    }
+
+    fun updatePackArrangement(records: List<PackIndexRecord>, onSuccess: () -> Unit = {}) {
+        val current = packs.map { PackIndexRecord(it.name, it.collapsed) }
+        if (records == current) {
+            onSuccess()
+            return
+        }
+        val byName = packs.associateBy { it.name }
+        if (records.size != packs.size || records.map { it.name }.toSet() != byName.keys) {
+            message = "表情包编辑数据已变化，请重试"
+            return
+        }
+        packs = records.map { record -> byName.getValue(record.name).copy(collapsed = record.collapsed) }
         manage(
             operation = {
-                this.reorderPacks(names)
-                "表情包顺序已更新"
+                this.updatePackArrangement(records)
+                "表情包顺序和折叠状态已更新"
             },
+            onSuccess = onSuccess,
         )
     }
 
@@ -254,6 +272,7 @@ class EmoRepoState(
 
     fun manage(
         operation: EmoticonRepository.() -> String,
+        onSuccess: () -> Unit = {},
         onComplete: () -> Unit = {},
     ) {
         scope.launch {
@@ -274,6 +293,7 @@ class EmoRepoState(
             loaded.onSuccess { packs = it }
                 .onFailure { message = it.message ?: "刷新失败" }
             busy = false
+            if (result.isSuccess) onSuccess()
             onComplete()
         }
     }
@@ -288,6 +308,49 @@ class EmoRepoState(
                 }
                 "删除 ${result.succeeded}，失败 ${result.failed}"
             },
+            onComplete = onComplete,
+        )
+    }
+
+    fun renamePack(oldName: String, newName: String, onComplete: () -> Unit = {}) {
+        manage(
+            operation = {
+                renamePack(oldName, newName)
+                "已重命名表情包：$oldName → $newName"
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    fun deletePack(name: String, onComplete: () -> Unit = {}) {
+        manage(
+            operation = {
+                val deleted = deletePack(name)
+                "已删除表情包 ${deleted.name}，共 ${deleted.records.size} 张表情"
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    fun applyPackEdit(
+        packName: String,
+        originalMd5Order: List<String>,
+        finalMd5Order: List<String>,
+        onSuccess: () -> Unit = {},
+        onComplete: () -> Unit = {},
+    ) {
+        manage(
+            operation = {
+                val edited = applyPackEdit(
+                    packName = packName,
+                    originalMd5Order = originalMd5Order,
+                    finalMd5Order = finalMd5Order,
+                    recentDeviceId = settings.deviceId,
+                    recentMaximumRecords = settings.recentMaximumRecords,
+                )
+                "已保存 ${edited.records.size} 张表情"
+            },
+            onSuccess = onSuccess,
             onComplete = onComplete,
         )
     }

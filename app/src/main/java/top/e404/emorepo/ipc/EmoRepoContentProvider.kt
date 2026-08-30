@@ -318,6 +318,7 @@ class EmoRepoContentProvider : ContentProvider() {
                 recentItems.firstOrNull()?.packId,
                 recentItems.size,
                 0,
+                0,
             ),
         )
         packs.forEach { pack ->
@@ -330,6 +331,7 @@ class EmoRepoContentProvider : ContentProvider() {
                     pack.name,
                     records.size,
                     1,
+                    if (pack.collapsed) 1 else 0,
                 ),
             )
         }
@@ -451,6 +453,7 @@ class EmoRepoContentProvider : ContentProvider() {
             EmoRepoIpcContract.COLUMN_COVER_PACK_ID,
             EmoRepoIpcContract.COLUMN_ITEM_COUNT,
             EmoRepoIpcContract.COLUMN_WRITABLE,
+            EmoRepoIpcContract.COLUMN_COLLAPSED,
         )
         val ITEM_COLUMNS = arrayOf(
             EmoRepoIpcContract.COLUMN_ID,

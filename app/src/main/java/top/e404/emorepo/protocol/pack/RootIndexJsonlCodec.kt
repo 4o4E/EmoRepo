@@ -12,7 +12,7 @@ import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.ProtocolNames
 
 object RootIndexJsonlCodec {
-    private val fieldNames = setOf("name")
+    private val fieldNames = setOf("name", "collapsed")
     private val gson: Gson = GsonBuilder()
         .disableHtmlEscaping()
         .setStrictness(Strictness.STRICT)
@@ -35,6 +35,7 @@ object RootIndexJsonlCodec {
         return records.joinToString(separator = "\n", postfix = "\n") { record ->
             gson.toJson(JsonObject().apply {
                 addProperty("name", record.name)
+                if (record.collapsed) addProperty("collapsed", true)
             })
         }
     }
@@ -64,6 +65,7 @@ object RootIndexJsonlCodec {
         }
         return PackIndexRecord(
             name = value.requireString("name", lineNumber),
+            collapsed = value.optionalBoolean("collapsed", lineNumber),
         ).also { validateRecord(it, "root index.jsonl line $lineNumber") }
     }
 
@@ -89,6 +91,14 @@ object RootIndexJsonlCodec {
             throw ProtocolException("root index.jsonl line $lineNumber $name must be a string")
         }
         return value.asString
+    }
+
+    private fun JsonObject.optionalBoolean(name: String, lineNumber: Int): Boolean {
+        val value = get(name) ?: return false
+        if (!value.isJsonPrimitive || !value.asJsonPrimitive.isBoolean || !value.asBoolean) {
+            throw ProtocolException("root index.jsonl line $lineNumber $name must be true or omitted")
+        }
+        return true
     }
 
 }

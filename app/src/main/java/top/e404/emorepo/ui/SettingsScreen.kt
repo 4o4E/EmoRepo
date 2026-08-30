@@ -31,7 +31,7 @@ import kotlin.math.roundToInt
 import top.e404.emorepo.config.SyncPhase
 
 @Composable
-fun SettingsScreen(state: EmoRepoState) {
+fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
     val current = state.settings
     var authorName by remember(current) { mutableStateOf(current.authorName) }
     var authorEmail by remember(current) { mutableStateOf(current.authorEmail) }
@@ -51,6 +51,16 @@ fun SettingsScreen(state: EmoRepoState) {
         modifier = Modifier.padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedButton(onClick = onBack) { Text("返回") }
+                Text("软件设置", style = MaterialTheme.typography.titleLarge)
+            }
+        }
         item {
             SettingsCard("仓库") {
                 Text(current.remoteUrl)
