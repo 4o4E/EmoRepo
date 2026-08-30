@@ -1,7 +1,7 @@
 # CI、发布与更新索引
 
 - 状态：`verified`
-- 更新：2026-08-27
+- 更新：2026-08-30
 
 ## 构建渠道
 
@@ -105,3 +105,10 @@ https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 - GitHub Release `EmoRepo 0.1.0` 不是 draft/prerelease，包含五个 APK、`SHA256SUMS` 和 `release-index.json`。
 - 独立下载后五个 SHA-256 全部通过；每个 APK 的文件大小、摘要和签名证书都与索引一致。
 - universal APK 为 `top.e404.emorepo`、`versionCode=1000`、`versionName=0.1.0`、`minSdk=24`、`targetSdk=36`；索引 tag、commit、五个 ABI 项和下载地址均正确。
+
+## 2026-08-30 release 验收
+
+- 标签 `v0.2.0` 指向 `a64a8d35e245fdb7a2fdd7b43672cdd519e42f1e`；run `33271388945` 成功完成测试、签名构建、摘要校验、索引生成和 Release 创建。
+- GitHub Release `EmoRepo 0.2.0` 不是 draft/prerelease，包含五个 APK、`SHA256SUMS` 和 `release-index.json`。
+- 独立下载后五个 SHA-256 全部通过；每个 APK 的文件大小、摘要和签名证书都与索引一致。
+- universal APK 为 `top.e404.emorepo`、`versionCode=2000`、`versionName=0.2.0`、`minSdk=24`、`targetSdk=36`；索引 tag、commit、五个 ABI 项和下载地址均正确。
