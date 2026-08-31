@@ -60,6 +60,7 @@ class JGitRepositoryService : GitRepositoryService {
         repositoryDirectory: File,
         settings: AppSettings,
         token: String?,
+        observer: GitSyncObserver,
     ): GitSyncResult {
         val root = repositoryDirectory.canonicalFile
         return RepositoryLocks.forRoot(root).withLock {
@@ -69,59 +70,138 @@ class JGitRepositoryService : GitRepositoryService {
                 if (repository.repositoryState.isRebasing) {
                     git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
                 }
-                require(repository.repositoryState == RepositoryState.SAFE) {
-                    "仓库处于未完成状态: ${repository.repositoryState.description}"
+                traced(observer, GitSyncStage.PRECHECK) {
+                    require(repository.repositoryState == RepositoryState.SAFE) {
+                        "仓库处于未完成状态: ${repository.repositoryState.description}"
+                    }
+                    recoverStaleIndexLock(repository, observer)
                 }
                 val warnings = mutableListOf<String>()
-                val committed = commitLocalChanges(git, settings)
+                val committed = commitLocalChanges(git, settings, observer)
                 val provider = credentials(token)
 
-                val fetch = git.fetch().setRemote(DEFAULT_REMOTE)
-                provider?.let(fetch::setCredentialsProvider)
-                fetch.call()
+                traced(observer, GitSyncStage.FETCH) {
+                    val fetch = git.fetch().setRemote(DEFAULT_REMOTE)
+                    provider?.let(fetch::setCredentialsProvider)
+                    fetch.call()
+                }
 
                 val branch = repository.branch
                 val upstream = BranchConfig(repository.config, branch).trackingBranch
                     ?: "$REMOTE_PREFIX$branch"
-                var result = git.rebase().setUpstream(upstream).call()
-                while (result.status == RebaseResult.Status.STOPPED) {
-                    warnings += resolveStoppedRebase(git)
-                    result = git.rebase().setOperation(RebaseCommand.Operation.CONTINUE).call()
+                traced(observer, GitSyncStage.REBASE, mapOf("branch" to branch)) {
+                    var result = git.rebase().setUpstream(upstream).call()
+                    while (result.status == RebaseResult.Status.STOPPED) {
+                        warnings += resolveStoppedRebase(git)
+                        result = git.rebase().setOperation(RebaseCommand.Operation.CONTINUE).call()
+                    }
+                    if (!result.status.isSuccessful) {
+                        git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
+                        throw ProtocolException("rebase 失败: ${result.status}")
+                    }
                 }
-                if (!result.status.isSuccessful) {
-                    git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
-                    throw ProtocolException("rebase 失败: ${result.status}")
+                traced(observer, GitSyncStage.VALIDATE) {
+                    // 根索引存在时必须与 rebase 后的实际表情包目录严格一致。
+                    EmoticonRepository(root).listPacks()
                 }
-                // 根索引存在时必须与 rebase 后的实际表情包目录严格一致。
-                EmoticonRepository(root).listPacks()
 
-                val push = git.push().setRemote(DEFAULT_REMOTE)
-                provider?.let(push::setCredentialsProvider)
-                val rejected = push.call()
-                    .flatMap { it.remoteUpdates }
-                    .filterNot { it.status in SUCCESSFUL_PUSH_STATUSES }
-                if (rejected.isNotEmpty()) {
-                    throw ProtocolException(
-                        "push 失败: " + rejected.joinToString { "${it.remoteName}=${it.status}" },
-                    )
+                traced(observer, GitSyncStage.PUSH) {
+                    val push = git.push().setRemote(DEFAULT_REMOTE)
+                    provider?.let(push::setCredentialsProvider)
+                    val rejected = push.call()
+                        .flatMap { it.remoteUpdates }
+                        .filterNot { it.status in SUCCESSFUL_PUSH_STATUSES }
+                    if (rejected.isNotEmpty()) {
+                        throw ProtocolException(
+                            "push 失败: " + rejected.joinToString { "${it.remoteName}=${it.status}" },
+                        )
+                    }
                 }
                 GitSyncResult(committed = committed, warnings = warnings)
             }
         }
     }
 
-    private fun commitLocalChanges(git: Git, settings: AppSettings): Boolean {
-        if (git.status().call().isClean) return false
-        git.add().addFilepattern(".").call()
-        git.add().addFilepattern(".").setUpdate(true).call()
-        if (git.status().call().isClean) return false
-        val identity = PersonIdent(settings.authorName, settings.authorEmail)
-        git.commit()
-            .setMessage(settings.commitMessage)
-            .setAuthor(identity)
-            .setCommitter(identity)
-            .call()
+    private fun commitLocalChanges(
+        git: Git,
+        settings: AppSettings,
+        observer: GitSyncObserver,
+    ): Boolean {
+        val dirty = traced(observer, GitSyncStage.STATUS) { !git.status().call().isClean }
+        if (!dirty) {
+            observer.onEvent(GitSyncStageEvent(GitSyncStage.STAGE, GitSyncStageOutcome.SKIPPED))
+            observer.onEvent(GitSyncStageEvent(GitSyncStage.COMMIT, GitSyncStageOutcome.SKIPPED))
+            return false
+        }
+        traced(observer, GitSyncStage.STAGE) {
+            git.add().addFilepattern(".").call()
+            git.add().addFilepattern(".").setUpdate(true).call()
+        }
+        if (git.status().call().isClean) {
+            observer.onEvent(GitSyncStageEvent(GitSyncStage.COMMIT, GitSyncStageOutcome.SKIPPED))
+            return false
+        }
+        traced(observer, GitSyncStage.COMMIT) {
+            val identity = PersonIdent(settings.authorName, settings.authorEmail)
+            git.commit()
+                .setMessage(settings.commitMessage)
+                .setAuthor(identity)
+                .setCommitter(identity)
+                .call()
+        }
         return true
+    }
+
+    private fun recoverStaleIndexLock(
+        repository: org.eclipse.jgit.lib.Repository,
+        observer: GitSyncObserver,
+    ) {
+        val lock = File(repository.directory, "index.lock")
+        if (!lock.exists()) return
+        require(repository.repositoryState == RepositoryState.SAFE) { "仓库状态不安全，拒绝清理索引锁" }
+        repository.readDirCache()
+        val ageMillis = (System.currentTimeMillis() - lock.lastModified()).coerceAtLeast(0L)
+        if (!lock.delete()) throw ProtocolException("无法清理陈旧 Git 索引锁")
+        observer.onEvent(
+            GitSyncStageEvent(
+                stage = GitSyncStage.PRECHECK,
+                outcome = GitSyncStageOutcome.WARNING,
+                fields = mapOf("recoveredStaleIndexLock" to "true", "lockAgeMillis" to ageMillis.toString()),
+            ),
+        )
+    }
+
+    private inline fun <T> traced(
+        observer: GitSyncObserver,
+        stage: GitSyncStage,
+        fields: Map<String, String> = emptyMap(),
+        operation: () -> T,
+    ): T {
+        observer.onEvent(GitSyncStageEvent(stage, GitSyncStageOutcome.STARTED, fields = fields))
+        val started = System.nanoTime()
+        return try {
+            operation().also {
+                observer.onEvent(
+                    GitSyncStageEvent(
+                        stage = stage,
+                        outcome = GitSyncStageOutcome.SUCCEEDED,
+                        durationMillis = (System.nanoTime() - started) / 1_000_000L,
+                        fields = fields,
+                    ),
+                )
+            }
+        } catch (error: Throwable) {
+            observer.onEvent(
+                GitSyncStageEvent(
+                    stage = stage,
+                    outcome = GitSyncStageOutcome.FAILED,
+                    durationMillis = (System.nanoTime() - started) / 1_000_000L,
+                    fields = fields,
+                    error = error,
+                ),
+            )
+            throw error
+        }
     }
 
     private fun resolveStoppedRebase(git: Git): List<String> {

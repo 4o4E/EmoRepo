@@ -32,6 +32,7 @@ import net.bytebuddy.matcher.ElementMatchers.named
 import net.bytebuddy.matcher.ElementMatchers.returns
 import net.bytebuddy.matcher.ElementMatchers.takesArguments
 import top.e404.emorepo.ipc.EmoRepoIpcContract
+import top.e404.emorepo.diagnostics.DiagnosticSanitizer
 
 /**
  * 在 QQ 原有图片消息菜单中增加 EmoRepo 导入项，不替换任何原生菜单行为。
@@ -389,7 +390,7 @@ internal object EmoRepoMessageMenuHook {
                 }
             }.onSuccess { feedback ->
                 val text = "导入完成：新增 ${feedback.succeeded}，重复 ${feedback.duplicates}，失败 ${feedback.failed}"
-                log("EmoRepo 批量导入结果：pack=$packId $text")
+                log("EmoRepo 批量导入结果：$text")
                 showToast(context, text)
             }.onFailure { error ->
                 log("导入 EmoRepo 失败", error)
@@ -614,11 +615,14 @@ internal object EmoRepoMessageMenuHook {
     )
 
     private fun log(message: String, error: Throwable? = null) {
-        Log.i(TAG, message, error)
+        val safeMessage = DiagnosticSanitizer.sanitize(message).orEmpty()
+        val safeStack = DiagnosticSanitizer.sanitize(error?.stackTraceToString())
+        if (safeStack == null) Log.i(TAG, safeMessage) else Log.e(TAG, "$safeMessage\n$safeStack")
+        QqDiagnosticBridge.forward(TAG, safeMessage, error)
         if (error == null) {
-            XposedBridge.log("[$TAG] $message")
+            XposedBridge.log("[$TAG] $safeMessage")
         } else {
-            XposedBridge.log("[$TAG] $message\n${Log.getStackTraceString(error)}")
+            XposedBridge.log("[$TAG] $safeMessage\n$safeStack")
         }
     }
 

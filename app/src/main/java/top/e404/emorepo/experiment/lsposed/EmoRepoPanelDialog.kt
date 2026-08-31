@@ -916,7 +916,7 @@ internal class EmoRepoPanelDialog private constructor(
                             if (visibleItems == null) {
                                 showError(error.message ?: "${pack.displayName} 读取失败") { bind(pack) }
                             } else {
-                                QqPanelIntegration.log("刷新 ${pack.displayName} 元数据失败，继续使用进程缓存", error)
+                                QqPanelIntegration.log("刷新当前表情包元数据失败，继续使用进程缓存", error)
                             }
                         }
                     }
@@ -953,7 +953,7 @@ internal class EmoRepoPanelDialog private constructor(
 
         fun startPreviewPreload() {
             stopPreviewPreload()
-            val pack = boundPack ?: return
+            if (boundPack == null) return
             val items = displayedItems
             if (items.isEmpty()) return
             // 可见首屏由高优先级网格任务负责，后台先从后续区域顺序预生成，再补首屏遗漏。
@@ -969,13 +969,12 @@ internal class EmoRepoPanelDialog private constructor(
                     val successful = runCatching {
                         QqPanelFirstFrameCache.preload(hostContext, item)
                     }.onFailure { error ->
-                        QqPanelIntegration.log("预加载 QQ 面板首帧失败：${item.packId}/${item.id}", error)
+                        QqPanelIntegration.log("预加载 QQ 面板首帧失败", error)
                     }.getOrDefault(false)
                     if (!successful) failed.incrementAndGet()
                     if (completed.incrementAndGet() == candidates.size) {
                         QqPanelIntegration.log(
-                            "当前表情包首帧预加载完成：pack=${pack.id}，" +
-                                "total=${candidates.size}，failed=${failed.get()}",
+                            "当前表情包首帧预加载完成：total=${candidates.size}，failed=${failed.get()}",
                         )
                     }
                 }
@@ -1135,7 +1134,7 @@ internal class EmoRepoPanelDialog private constructor(
                                 }
                             }
                         }.onFailure { error ->
-                            QqPanelIntegration.log("保护 QQ 面板内存缓存原文件失败：${item.packId}/${item.id}", error)
+                            QqPanelIntegration.log("保护 QQ 面板内存缓存原文件失败", error)
                         }
                 }
                 return image
@@ -1153,7 +1152,7 @@ internal class EmoRepoPanelDialog private constructor(
                             )
                         }.onFailure { error ->
                             QqPanelIntegration.log(
-                                "生成 QQ 面板首帧失败：${item.packId}/${item.id}",
+                                "生成 QQ 面板首帧失败",
                                 error,
                             )
                         }.getOrNull()
@@ -1173,7 +1172,7 @@ internal class EmoRepoPanelDialog private constructor(
                             }
                         }
                     }.onFailure { error ->
-                        QqPanelIntegration.log("加载 QQ 面板表情失败：${item.packId}/${item.id}", error)
+                        QqPanelIntegration.log("加载 QQ 面板表情失败", error)
                     }
             }
             return image
@@ -1200,8 +1199,7 @@ internal class EmoRepoPanelDialog private constructor(
             if (!logStatistics) return
             val cache = imageLoader.memoryCache
             QqPanelIntegration.log(
-                "释放表情网格：pack=${items.firstOrNull()?.packId.orEmpty()}，" +
-                    "memoryHits=$memoryHits，memoryMisses=$memoryMisses，" +
+                "释放表情网格：memoryHits=$memoryHits，memoryMisses=$memoryMisses，" +
                     "firstFrameHits=$firstFrameHits，firstFrameMisses=$firstFrameMisses，" +
                     "cacheBytes=${cache?.size ?: 0}/${cache?.maxSize ?: 0}",
             )

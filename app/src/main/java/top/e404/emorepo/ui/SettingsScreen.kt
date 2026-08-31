@@ -1,5 +1,7 @@
 package top.e404.emorepo.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -26,7 +28,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 import top.e404.emorepo.config.SyncPhase
 
@@ -44,6 +48,11 @@ fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
     var commitMessage by remember(current) { mutableStateOf(current.commitMessage) }
     var qqPanelColumns by remember(current) { mutableStateOf(current.qqPanelColumns) }
     var newToken by remember { mutableStateOf("") }
+    val diagnosticExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { destination ->
+        if (destination != null) state.exportDiagnostics(destination)
+    }
 
     LaunchedEffect(Unit) { state.refreshSyncStatus() }
 
@@ -168,6 +177,18 @@ fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
                         Text("清除 Token")
                     }
                 }
+            }
+        }
+        item {
+            SettingsCard("诊断") {
+                Text("导出脱敏后的应用、同步和 QQ Hook 日志，不包含聊天内容、Token、表情或索引。")
+                OutlinedButton(
+                    onClick = {
+                        val time = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+                        diagnosticExportLauncher.launch("EmoRepo-diagnostics-$time.zip")
+                    },
+                    enabled = !state.busy,
+                ) { Text("导出诊断日志") }
             }
         }
     }

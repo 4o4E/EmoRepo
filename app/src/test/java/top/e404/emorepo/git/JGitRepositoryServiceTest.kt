@@ -4,6 +4,7 @@ import java.io.File
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.PersonIdent
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -85,6 +86,39 @@ class JGitRepositoryServiceTest {
         val records = RootIndexJsonlCodec.decode(File(verification, "index.jsonl").readText())
         assertEquals(listOf("b", "c", "a"), records.map { it.name })
         assertTrue(File(verification, "c/index.jsonl").isFile)
+    }
+
+    @Test
+    fun `sync recovers stale index lock after validating existing index`() {
+        val remote = createRemoteWithInitialCommit()
+        val local = clone(remote, "stale-lock-local")
+        File(local, "local-change.txt").writeText("local")
+        val lock = File(local, ".git/index.lock").apply { writeText("") }
+        val events = mutableListOf<GitSyncStageEvent>()
+
+        JGitRepositoryService().sync(local, settings(), token = null) { event -> events += event }
+
+        assertFalse(lock.exists())
+        assertTrue(
+            events.any { event ->
+                event.stage == GitSyncStage.PRECHECK &&
+                    event.outcome == GitSyncStageOutcome.WARNING &&
+                    event.fields["recoveredStaleIndexLock"] == "true"
+            },
+        )
+    }
+
+    @Test
+    fun `sync keeps index lock when existing index cannot be validated`() {
+        val remote = createRemoteWithInitialCommit()
+        val local = clone(remote, "broken-index-local")
+        File(local, ".git/index").writeBytes(byteArrayOf(1, 2, 3, 4))
+        val lock = File(local, ".git/index.lock").apply { writeText("") }
+
+        val result = runCatching { JGitRepositoryService().sync(local, settings(), token = null) }
+
+        assertTrue(result.isFailure)
+        assertTrue(lock.exists())
     }
 
     private fun createRemoteWithInitialCommit(

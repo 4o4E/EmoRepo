@@ -12,7 +12,11 @@ import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.RandomAccessFile
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import top.e404.emorepo.config.SettingsStore
+import top.e404.emorepo.diagnostics.DiagnosticLogLevel
+import top.e404.emorepo.diagnostics.DiagnosticLogger
 import top.e404.emorepo.git.GitSyncScheduler
 import top.e404.emorepo.repository.EmoticonRepository
 import top.e404.emorepo.repository.EmoticonPack
@@ -37,6 +41,8 @@ class EmoRepoContentProvider : ContentProvider() {
         repository = EmoticonRepository(root)
         callerVerifier = CallerVerifier(appContext)
         revisionTracker = RepositoryRevisionTracker(appContext)
+        DiagnosticLogger.initialize(appContext)
+        DiagnosticLogger.info("provider", "created")
         return true
     }
 
@@ -49,7 +55,9 @@ class EmoRepoContentProvider : ContentProvider() {
     ): Cursor {
         callerVerifier.enforceAllowedCaller()
         requireReadyRepository()
-        return when (URI_MATCHER.match(uri)) {
+        val match = URI_MATCHER.match(uri)
+        DiagnosticLogger.debug("provider", "query", fields = mapOf("route" to match))
+        return when (match) {
             MATCH_REVISION -> queryRevision()
             MATCH_PANEL_CONFIGURATION -> queryPanelConfiguration()
             MATCH_PACKS -> queryPacks()
@@ -61,6 +69,7 @@ class EmoRepoContentProvider : ContentProvider() {
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
         callerVerifier.enforceAllowedCaller()
         requireReadyRepository()
+        DiagnosticLogger.debug("provider", "open_image")
         require(mode == "r") { "EmoRepo Provider 只允许只读打开图片" }
         require(URI_MATCHER.match(uri) == MATCH_ITEM) { "不支持的 EmoRepo 图片 URI：$uri" }
         val packId = uri.pathSegments[1]
@@ -74,9 +83,13 @@ class EmoRepoContentProvider : ContentProvider() {
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         callerVerifier.enforceAllowedCaller()
+        if (method != EmoRepoIpcContract.METHOD_APPEND_DIAGNOSTIC_LOG) {
+            DiagnosticLogger.info("provider", "call", fields = mapOf("method" to method))
+        }
         when (method) {
             EmoRepoIpcContract.METHOD_GET_QQ_LOCATOR_CACHE -> return getQqLocatorCache(extras)
             EmoRepoIpcContract.METHOD_PUT_QQ_LOCATOR_CACHE -> return putQqLocatorCache(extras)
+            EmoRepoIpcContract.METHOD_APPEND_DIAGNOSTIC_LOG -> return appendDiagnosticLog(extras)
         }
         requireReadyRepository()
         return when (method) {
@@ -85,6 +98,67 @@ class EmoRepoContentProvider : ContentProvider() {
             EmoRepoIpcContract.METHOD_IMPORT_ITEMS -> importItems(extras)
             else -> throw IllegalArgumentException("不支持的 EmoRepo Provider 调用：$method")
         }
+    }
+
+    private fun appendDiagnosticLog(extras: Bundle?): Bundle {
+        if (!acceptExternalLog()) return Bundle.EMPTY
+        val values = requireNotNull(extras) { "诊断日志缺少参数" }
+        val level = runCatching {
+            DiagnosticLogLevel.valueOf(values.getString(EmoRepoIpcContract.EXTRA_LOG_LEVEL).orEmpty())
+        }.getOrElse { throw IllegalArgumentException("诊断日志级别无效") }
+        val component = requireBoundedLogValue(
+            values.getString(EmoRepoIpcContract.EXTRA_LOG_COMPONENT),
+            MAXIMUM_LOG_NAME_CHARS,
+            "组件",
+        )
+        val event = requireBoundedLogValue(
+            values.getString(EmoRepoIpcContract.EXTRA_LOG_EVENT),
+            MAXIMUM_LOG_NAME_CHARS,
+            "事件",
+        )
+        val message = optionalBoundedLogValue(
+            values.getString(EmoRepoIpcContract.EXTRA_LOG_MESSAGE),
+            DiagnosticLogger.MAXIMUM_MESSAGE_CHARS,
+            "消息",
+        )
+        val exceptionType = optionalBoundedLogValue(
+            values.getString(EmoRepoIpcContract.EXTRA_LOG_EXCEPTION_TYPE),
+            MAXIMUM_EXCEPTION_TYPE_CHARS,
+            "异常类型",
+        )
+        val exceptionMessage = optionalBoundedLogValue(
+            values.getString(EmoRepoIpcContract.EXTRA_LOG_EXCEPTION_MESSAGE),
+            DiagnosticLogger.MAXIMUM_MESSAGE_CHARS,
+            "异常消息",
+        )
+        val stackTrace = optionalBoundedLogValue(
+            values.getString(EmoRepoIpcContract.EXTRA_LOG_STACK_TRACE),
+            DiagnosticLogger.MAXIMUM_STACK_CHARS,
+            "异常堆栈",
+        )
+        DiagnosticLogger.external(level, component, event, message, exceptionType, exceptionMessage, stackTrace)
+        return Bundle.EMPTY
+    }
+
+    private fun acceptExternalLog(): Boolean {
+        val now = System.currentTimeMillis()
+        val start = externalLogWindowStarted.get()
+        if (now - start >= EXTERNAL_LOG_WINDOW_MILLIS && externalLogWindowStarted.compareAndSet(start, now)) {
+            externalLogCount.set(0)
+        }
+        return externalLogCount.incrementAndGet() <= MAXIMUM_EXTERNAL_LOGS_PER_WINDOW
+    }
+
+    private fun requireBoundedLogValue(value: String?, maximum: Int, name: String): String {
+        val required = requireNotNull(value) { "诊断日志缺少$name" }
+        require(required.isNotBlank() && required.length <= maximum) { "诊断日志${name}长度无效" }
+        return required
+    }
+
+    private fun optionalBoundedLogValue(value: String?, maximum: Int, name: String): String? {
+        if (value == null) return null
+        require(value.length <= maximum) { "诊断日志${name}过长" }
+        return value
     }
 
     private fun getQqLocatorCache(extras: Bundle?): Bundle {
@@ -172,6 +246,7 @@ class EmoRepoContentProvider : ContentProvider() {
         val settings = SettingsStore(appContext).load()
         RecentUsageRepository(root, settings.deviceId, settings.recentMaximumRecords)
             .recordUse(packId, record.name, usedAt)
+        DiagnosticLogger.debug("provider", "recent_usage_recorded")
         GitSyncScheduler.requestRecentUsage(appContext, settings.recentSyncDelayMinutes)
         return Bundle.EMPTY
     }
@@ -269,6 +344,15 @@ class EmoRepoContentProvider : ContentProvider() {
         if (result.items.any { it.status == ManagementStatus.SUCCESS }) {
             GitSyncScheduler.requestAfterModification(appContext)
         }
+        DiagnosticLogger.info(
+            component = "provider",
+            event = "import_finished",
+            fields = mapOf(
+                "successCount" to result.items.count { it.status == ManagementStatus.SUCCESS },
+                "duplicateCount" to result.items.count { it.status == ManagementStatus.DUPLICATE },
+                "failureCount" to result.items.count { it.status == ManagementStatus.FAILED },
+            ),
+        )
     }
 
     override fun getType(uri: Uri): String? = when (URI_MATCHER.match(uri)) {
@@ -434,6 +518,12 @@ class EmoRepoContentProvider : ContentProvider() {
         const val CACHE_APK_LAST_MODIFIED = "apk_last_modified"
         const val CACHE_APK_LENGTH = "apk_length"
         const val CACHE_CLASS_NAME = "class_name"
+        const val MAXIMUM_LOG_NAME_CHARS = 80
+        const val MAXIMUM_EXCEPTION_TYPE_CHARS = 240
+        const val MAXIMUM_EXTERNAL_LOGS_PER_WINDOW = 120
+        const val EXTERNAL_LOG_WINDOW_MILLIS = 60_000L
+        val externalLogWindowStarted = AtomicLong(System.currentTimeMillis())
+        val externalLogCount = AtomicInteger(0)
 
         const val MAXIMUM_LOCATOR_VALUE_LENGTH = 1024
         val ALLOWED_QQ_LOCATOR_IDS = setOf(

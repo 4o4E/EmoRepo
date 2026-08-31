@@ -67,3 +67,5 @@
 | RELEASE-001 | 普通提交构建可调试 dev 渠道并只上传 Actions Artifact | `release/ci-and-updates.md` | verified | `android-dev.yml`、`collect-apks.sh`；run `33034944943` 的五 APK Artifact、SHA-256、dev 包名/版本/调试状态和持久签名验收 |
 | RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | verified | `android-release.yml`；`v0.3.0` run `33325777021`、五个签名 APK 和 GitHub Release 独立下载验收 |
 | RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `v0.3.0` `release-index.json` 的 tag/commit/版本/五 ABI/尺寸/SHA-256/证书/下载地址独立验收 |
+| DIAG-001 | App、同步和 QQ Hook 生成脱敏轮转文件日志，并可导出诊断 ZIP | `diagnostics/logging.md` | implemented | `DiagnosticLogger`、`DiagnosticLogStore`、`QqDiagnosticBridge`、`DiagnosticExporter`；JVM 测试已通过，Release 真机待验证 |
+| SYNC-005 | 同步按阶段记录完整异常，并安全恢复陈旧 Git 索引锁 | `diagnostics/logging.md` | implemented | `GitSyncExecutor`、`JGitRepositoryService`；陈旧锁恢复/损坏索引保留 JVM 测试已通过，Release 真机待验证 |

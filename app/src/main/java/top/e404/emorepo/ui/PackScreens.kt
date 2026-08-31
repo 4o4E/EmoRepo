@@ -213,7 +213,10 @@ fun PackListScreen(
             onDismiss = { createPackDialog = false },
             onConfirm = { name ->
                 createPackDialog = false
-                state.manage(operation = { createPack(name); "已创建表情包 $name" })
+                state.manage(
+                    operationName = "create_pack",
+                    operation = { createPack(name); "已创建表情包 $name" },
+                )
             },
         )
     }

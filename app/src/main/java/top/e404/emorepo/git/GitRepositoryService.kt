@@ -8,10 +8,44 @@ data class GitSyncResult(
     val warnings: List<String>,
 )
 
+enum class GitSyncStage(val displayName: String) {
+    PRECHECK("仓库预检"),
+    STATUS("检查本地变更"),
+    STAGE("暂存"),
+    COMMIT("提交"),
+    FETCH("拉取远端"),
+    REBASE("变基"),
+    VALIDATE("协议校验"),
+    PUSH("推送"),
+}
+
+enum class GitSyncStageOutcome { STARTED, SUCCEEDED, SKIPPED, WARNING, FAILED }
+
+data class GitSyncStageEvent(
+    val stage: GitSyncStage,
+    val outcome: GitSyncStageOutcome,
+    val durationMillis: Long? = null,
+    val fields: Map<String, String> = emptyMap(),
+    val error: Throwable? = null,
+)
+
+fun interface GitSyncObserver {
+    fun onEvent(event: GitSyncStageEvent)
+
+    companion object {
+        val NONE = GitSyncObserver { }
+    }
+}
+
 interface GitRepositoryService {
     fun isValidRepository(repositoryDirectory: File): Boolean
 
     fun cloneRepository(remoteUrl: String, token: String?, repositoryDirectory: File)
 
-    fun sync(repositoryDirectory: File, settings: AppSettings, token: String?): GitSyncResult
+    fun sync(
+        repositoryDirectory: File,
+        settings: AppSettings,
+        token: String?,
+        observer: GitSyncObserver = GitSyncObserver.NONE,
+    ): GitSyncResult
 }

@@ -5,6 +5,7 @@ import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.util.concurrent.atomic.AtomicBoolean
+import top.e404.emorepo.diagnostics.DiagnosticSanitizer
 
 /** EmoRepo 独立 LSPosed 入口，只在 QQ 主进程安装当前产品能力。 */
 class EmoRepoXposedEntry : IXposedHookLoadPackage {
@@ -27,11 +28,14 @@ class EmoRepoXposedEntry : IXposedHookLoadPackage {
         val initialized = AtomicBoolean(false)
 
         fun log(message: String, error: Throwable? = null) {
-            Log.i(TAG, message, error)
+            val safeMessage = DiagnosticSanitizer.sanitize(message).orEmpty()
+            val safeStack = DiagnosticSanitizer.sanitize(error?.stackTraceToString())
+            if (safeStack == null) Log.i(TAG, safeMessage) else Log.e(TAG, "$safeMessage\n$safeStack")
+            QqDiagnosticBridge.forward(TAG, safeMessage, error)
             if (error == null) {
-                XposedBridge.log("[$TAG] $message")
+                XposedBridge.log("[$TAG] $safeMessage")
             } else {
-                XposedBridge.log("[$TAG] $message\n${Log.getStackTraceString(error)}")
+                XposedBridge.log("[$TAG] $safeMessage\n$safeStack")
             }
         }
     }

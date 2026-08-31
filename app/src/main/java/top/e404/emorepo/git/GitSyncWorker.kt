@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.e404.emorepo.config.AppSettings
+import top.e404.emorepo.diagnostics.DiagnosticLogger
 
 class GitSyncWorker(
     applicationContext: Context,
@@ -23,12 +24,19 @@ class GitSyncWorker(
 ) : CoroutineWorker(applicationContext, workerParameters) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
-            GitSyncExecutor(applicationContext).run()
+            GitSyncExecutor(applicationContext).run(runAttemptCount)
             Result.success()
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            if (runAttemptCount < MAXIMUM_RETRIES) Result.retry() else Result.failure()
+            val retry = runAttemptCount < MAXIMUM_RETRIES
+            DiagnosticLogger.warn(
+                component = "git_sync_worker",
+                event = if (retry) "retry_scheduled" else "retry_exhausted",
+                fields = mapOf("attempt" to runAttemptCount, "willRetry" to retry),
+                message = error.message,
+            )
+            if (retry) Result.retry() else Result.failure()
         }
     }
 
@@ -39,6 +47,7 @@ class GitSyncWorker(
 
 object GitSyncScheduler {
     fun requestImmediate(context: Context) {
+        DiagnosticLogger.info("git_sync_scheduler", "immediate_requested")
         WorkManager.getInstance(context).enqueueUniqueWork(
             IMMEDIATE_WORK_NAME,
             ExistingWorkPolicy.KEEP,
@@ -47,6 +56,11 @@ object GitSyncScheduler {
     }
 
     fun requestAfterModification(context: Context) {
+        DiagnosticLogger.info(
+            "git_sync_scheduler",
+            "modification_requested",
+            fields = mapOf("delaySeconds" to MODIFICATION_DEBOUNCE_SECONDS),
+        )
         val request = oneTimeRequest(initialDelaySeconds = MODIFICATION_DEBOUNCE_SECONDS)
         WorkManager.getInstance(context).enqueueUniqueWork(
             MODIFICATION_WORK_NAME,
@@ -57,6 +71,11 @@ object GitSyncScheduler {
 
     fun requestRecentUsage(context: Context, delayMinutes: Int) {
         require(delayMinutes >= 0) { "使用记录同步延迟不能小于 0" }
+        DiagnosticLogger.info(
+            "git_sync_scheduler",
+            "recent_usage_requested",
+            fields = mapOf("delayMinutes" to delayMinutes),
+        )
         val request = oneTimeRequest(initialDelayMinutes = delayMinutes.toLong())
         WorkManager.getInstance(context).enqueueUniqueWork(
             RECENT_USAGE_WORK_NAME,
@@ -68,6 +87,7 @@ object GitSyncScheduler {
     fun updatePeriodic(context: Context, settings: AppSettings) {
         val manager = WorkManager.getInstance(context)
         if (!settings.setupComplete || settings.backgroundSyncIntervalMinutes == 0) {
+            DiagnosticLogger.info("git_sync_scheduler", "periodic_disabled")
             manager.cancelUniqueWork(PERIODIC_WORK_NAME)
             return
         }
@@ -78,6 +98,11 @@ object GitSyncScheduler {
             .setConstraints(networkConstraints())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
             .build()
+        DiagnosticLogger.info(
+            "git_sync_scheduler",
+            "periodic_updated",
+            fields = mapOf("intervalMinutes" to settings.backgroundSyncIntervalMinutes),
+        )
         manager.enqueueUniquePeriodicWork(
             PERIODIC_WORK_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,

@@ -17,6 +17,7 @@ import de.robv.android.xposed.XposedBridge
 import java.lang.reflect.Field
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import top.e404.emorepo.diagnostics.DiagnosticSanitizer
 
 /** 安装 QQ 表情按钮入口、会话跟踪和面板调用。 */
 internal object QqPanelIntegration {
@@ -233,11 +234,14 @@ internal object QqPanelIntegration {
     }
 
     fun log(message: String, error: Throwable? = null) {
-        Log.i(TAG, message, error)
+        val safeMessage = DiagnosticSanitizer.sanitize(message).orEmpty()
+        val safeStack = DiagnosticSanitizer.sanitize(error?.stackTraceToString())
+        if (safeStack == null) Log.i(TAG, safeMessage) else Log.e(TAG, "$safeMessage\n$safeStack")
+        QqDiagnosticBridge.forward(TAG, safeMessage, error)
         if (error == null) {
-            XposedBridge.log("[$TAG] $message")
+            XposedBridge.log("[$TAG] $safeMessage")
         } else {
-            XposedBridge.log("[$TAG] $message\n${Log.getStackTraceString(error)}")
+            XposedBridge.log("[$TAG] $safeMessage\n$safeStack")
         }
     }
 

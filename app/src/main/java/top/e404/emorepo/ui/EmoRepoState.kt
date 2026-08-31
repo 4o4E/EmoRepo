@@ -27,6 +27,8 @@ import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.config.SetupInput
 import top.e404.emorepo.config.SyncStatus
 import top.e404.emorepo.config.validated
+import top.e404.emorepo.diagnostics.DiagnosticExporter
+import top.e404.emorepo.diagnostics.DiagnosticLogger
 import top.e404.emorepo.git.GitRepositoryService
 import top.e404.emorepo.git.GitSyncExecutor
 import top.e404.emorepo.git.GitSyncScheduler
@@ -83,6 +85,7 @@ class EmoRepoState(
     fun reload() {
         scope.launch {
             busy = true
+            DiagnosticLogger.info("ui_state", "reload_started")
             settings = settingsStore.load()
             syncStatus = settingsStore.loadSyncStatus()
             repositoryReady = withContext(Dispatchers.IO) {
@@ -91,8 +94,13 @@ class EmoRepoState(
             val result = withContext(Dispatchers.IO) {
                 runCatching { if (setupRequired) emptyList() else repository.listPacks() }
             }
-            result.onSuccess { packs = it }
-                .onFailure { message = it.message ?: "读取仓库失败" }
+            result.onSuccess {
+                packs = it
+                DiagnosticLogger.info("ui_state", "reload_succeeded", fields = mapOf("packCount" to it.size))
+            }.onFailure { error ->
+                DiagnosticLogger.error("ui_state", "reload_failed", "读取仓库失败", error = error)
+                message = error.message ?: "读取仓库失败"
+            }
             busy = false
             if (!setupRequired) GitSyncScheduler.requestImmediate(context)
         }
@@ -101,6 +109,8 @@ class EmoRepoState(
     fun completeSetup(input: SetupInput, token: String) {
         scope.launch {
             busy = true
+            val started = System.nanoTime()
+            DiagnosticLogger.info("setup", "clone_started")
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val valid = input.validated()
@@ -134,8 +144,24 @@ class EmoRepoState(
                 GitSyncScheduler.updatePeriodic(context, configured)
                 packs = loadedPacks
                 message = "仓库克隆完成"
+                DiagnosticLogger.info(
+                    "setup",
+                    "clone_succeeded",
+                    fields = mapOf(
+                        "packCount" to loadedPacks.size,
+                        "durationMillis" to (System.nanoTime() - started) / 1_000_000L,
+                    ),
+                )
             }.onFailure { error ->
                 if (error is CancellationException) throw error
+                DiagnosticLogger.error(
+                    component = "setup",
+                    event = "clone_failed",
+                    message = "仓库克隆失败",
+                    fields = mapOf("durationMillis" to (System.nanoTime() - started) / 1_000_000L),
+                    error = error,
+                    secrets = listOf(token),
+                )
                 message = error.message ?: "仓库克隆失败"
             }
             busy = false
@@ -176,8 +202,10 @@ class EmoRepoState(
                 GitSyncScheduler.updatePeriodic(context, valid)
                 if (recentFilesMayHaveChanged) GitSyncScheduler.requestAfterModification(context)
                 message = "设置已保存"
+                DiagnosticLogger.info("settings", "settings_saved")
             }.onFailure { error ->
                 if (error is CancellationException) throw error
+                DiagnosticLogger.error("settings", "settings_save_failed", error = error)
                 message = error.message ?: "保存设置失败"
             }
             busy = false
@@ -190,9 +218,19 @@ class EmoRepoState(
             val result = withContext(Dispatchers.IO) { runCatching { tokenStore.save(token) } }
             result.onSuccess {
                 message = if (token.isNullOrBlank()) "Token 已清除" else "Token 已更新"
+                DiagnosticLogger.info(
+                    "settings",
+                    if (token.isNullOrBlank()) "token_cleared" else "token_updated",
+                )
                 GitSyncScheduler.requestImmediate(context)
             }.onFailure { error ->
                 if (error is CancellationException) throw error
+                DiagnosticLogger.error(
+                    component = "settings",
+                    event = "token_update_failed",
+                    error = error,
+                    secrets = listOfNotNull(token),
+                )
                 message = error.message ?: "更新 Token 失败"
             }
             busy = false
@@ -251,6 +289,7 @@ class EmoRepoState(
         }
         packs = records.map { record -> byName.getValue(record.name).copy(collapsed = record.collapsed) }
         manage(
+            operationName = "update_pack_arrangement",
             operation = {
                 this.updatePackArrangement(records)
                 "表情包顺序和折叠状态已更新"
@@ -271,12 +310,15 @@ class EmoRepoState(
     }
 
     fun manage(
+        operationName: String = "repository_mutation",
         operation: EmoticonRepository.() -> String,
         onSuccess: () -> Unit = {},
         onComplete: () -> Unit = {},
     ) {
         scope.launch {
             busy = true
+            val started = System.nanoTime()
+            DiagnosticLogger.info("repository", "operation_started", fields = mapOf("operation" to operationName))
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     RepositoryLocks.forRoot(repositoryDirectory).withLock { repository.operation() }
@@ -284,10 +326,30 @@ class EmoRepoState(
             }
             message = result.fold(
                 onSuccess = {
+                    DiagnosticLogger.info(
+                        "repository",
+                        "operation_succeeded",
+                        fields = mapOf(
+                            "operation" to operationName,
+                            "durationMillis" to (System.nanoTime() - started) / 1_000_000L,
+                        ),
+                    )
                     GitSyncScheduler.requestAfterModification(context)
                     it
                 },
-                onFailure = { it.message ?: "操作失败" },
+                onFailure = { error ->
+                    DiagnosticLogger.error(
+                        component = "repository",
+                        event = "operation_failed",
+                        message = "仓库操作失败",
+                        fields = mapOf(
+                            "operation" to operationName,
+                            "durationMillis" to (System.nanoTime() - started) / 1_000_000L,
+                        ),
+                        error = error,
+                    )
+                    error.message ?: "操作失败"
+                },
             )
             val loaded = withContext(Dispatchers.IO) { runCatching { repository.listPacks() } }
             loaded.onSuccess { packs = it }
@@ -300,6 +362,7 @@ class EmoRepoState(
 
     fun deleteEmoticons(packName: String, md5Values: List<String>, onComplete: () -> Unit = {}) {
         manage(
+            operationName = "delete_emoticons",
             operation = {
                 val result = delete(packName, md5Values)
                 val recent = recentUsageRepository()
@@ -314,6 +377,7 @@ class EmoRepoState(
 
     fun renamePack(oldName: String, newName: String, onComplete: () -> Unit = {}) {
         manage(
+            operationName = "rename_pack",
             operation = {
                 renamePack(oldName, newName)
                 "已重命名表情包：$oldName → $newName"
@@ -324,6 +388,7 @@ class EmoRepoState(
 
     fun deletePack(name: String, onComplete: () -> Unit = {}) {
         manage(
+            operationName = "delete_pack",
             operation = {
                 val deleted = deletePack(name)
                 "已删除表情包 ${deleted.name}，共 ${deleted.records.size} 张表情"
@@ -340,6 +405,7 @@ class EmoRepoState(
         onComplete: () -> Unit = {},
     ) {
         manage(
+            operationName = "apply_pack_edit",
             operation = {
                 val edited = applyPackEdit(
                     packName = packName,
@@ -362,6 +428,7 @@ class EmoRepoState(
         onComplete: () -> Unit = {},
     ) {
         manage(
+            operationName = "move_emoticons",
             operation = {
                 val sourceNames = getPack(sourcePackName).records.associate { it.md5 to it.name }
                 val result = move(sourcePackName, targetPackName, md5Values)
@@ -383,6 +450,7 @@ class EmoRepoState(
     fun importUris(packName: String, uris: List<Uri>, onComplete: () -> Unit = {}) {
         if (uris.isEmpty()) return
         manage(
+            operationName = "import_emoticons",
             operation = {
                 require(uris.size <= ImportLimits.MAXIMUM_ITEMS) {
                     "单次最多导入 ${ImportLimits.MAXIMUM_ITEMS} 张图片"
@@ -429,6 +497,27 @@ class EmoRepoState(
                 .onFailure { error ->
                     if (error is CancellationException) throw error
                     message = error.message ?: "导出失败"
+                }
+            busy = false
+        }
+    }
+
+    fun exportDiagnostics(destination: Uri) {
+        scope.launch {
+            busy = true
+            val result = withContext(Dispatchers.IO) {
+                runCatching { DiagnosticExporter.export(context, destination) }
+            }
+            result.onSuccess { message = "诊断日志已导出" }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    DiagnosticLogger.error(
+                        component = "ui",
+                        event = "diagnostic_export_failed",
+                        message = "设置页导出诊断日志失败",
+                        error = error,
+                    )
+                    message = error.message ?: "导出诊断日志失败"
                 }
             busy = false
         }

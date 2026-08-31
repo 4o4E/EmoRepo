@@ -9,11 +9,18 @@ import coil3.gif.AnimatedImageDecoder
 import coil3.gif.GifDecoder
 import coil3.memory.MemoryCache
 import top.e404.emorepo.config.SettingsStore
+import top.e404.emorepo.diagnostics.DiagnosticLogger
 import top.e404.emorepo.git.GitSyncScheduler
 
 class EmoRepoApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
+        DiagnosticLogger.initialize(this)
+        DiagnosticLogger.info(
+            component = "application",
+            event = "application_created",
+            fields = mapOf("version" to BuildConfig.VERSION_NAME),
+        )
         GitSyncScheduler.updatePeriodic(this, SettingsStore(this).load())
     }
 
