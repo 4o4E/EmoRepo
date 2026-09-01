@@ -134,3 +134,10 @@ https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 - arm64 正式版已覆盖安装到 `CPH2653`，保留原仓库和设置；版本为 `versionCode=3001`、`versionName=0.3.1`。
 - 首次同步安全恢复约 23.7 小时的陈旧 `.git/index.lock`，依次完成暂存、提交、fetch、rebase、协议校验和 push；设备与远端 `face/master` 同为 `6fb2ae401dbf0c1eaf938bd2192f5f81d4e52cb7`。
 - 系统文件创建器成功导出含 App 和 QQ Hook 日志的诊断 ZIP；49 行日志均为合法 JSON，未发现 Token/认证字段、邮箱或 QQ 聊天/会话字段。
+
+## 2026-09-01 0.3.2 release 验收
+
+- 标签 `v0.3.2` 指向 `d1607f91145c35b7943f0d46a4f68cb47970671a`；release run `33485428580` 成功完成 106 项测试、签名构建、五包签名校验、更新索引生成和 GitHub Release 创建，配套 main dev run `33485402009` 同时成功。
+- GitHub Release `EmoRepo 0.3.2` 不是 draft/prerelease，包含 universal、arm64-v8a、armeabi-v7a、x86、x86_64 五个 APK、`SHA256SUMS` 和 `release-index.json`。
+- 独立下载后，五个 APK 的文件大小和 SHA-256 均与 `SHA256SUMS`、`release-index.json` 及 GitHub asset digest 一致；五包证书 SHA-256 均为 `95aea64497d6e79e56a29d77624f876d27e5ad1c7d0fc867932cc7f556268022`。
+- universal APK 为 `top.e404.emorepo`、`versionCode=3002`、`versionName=0.3.2`、`minSdk=24`、`targetSdk=36`；索引 tag、commit、ABI 固定顺序、尺寸、摘要和下载地址全部匹配。
