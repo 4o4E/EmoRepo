@@ -69,5 +69,5 @@
 | RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `v0.3.1` `release-index.json` 的 tag/commit/版本/五 ABI/尺寸/SHA-256/证书/下载地址独立验收 |
 | DIAG-001 | App、同步和 QQ Hook 生成脱敏轮转文件日志，并可导出诊断 ZIP | `diagnostics/logging.md` | verified | `DiagnosticLogger`、`DiagnosticLogStore`、`QqDiagnosticBridge`、`DiagnosticExporter`；102 项 JVM 测试，0.3.1 真机 App/QQ 文件日志、系统导出和 ZIP 隐私检查通过 |
 | SYNC-005 | 同步按阶段记录完整异常，并安全恢复陈旧 Git 索引锁 | `diagnostics/logging.md` | verified | `GitSyncExecutor`、`JGitRepositoryService`；陈旧锁恢复/损坏索引保留 JVM 测试，0.3.1 真机恢复 23.7 小时旧锁并完成 add/fetch/rebase/校验/push |
-| HOOK-005 | QQ 面板将折叠包连续置于分页末尾、在同一包栏内展开，并支持网格到底后继续上拖循环切包 | `architecture/qq-panel.md` | implemented | `PanelNavigation`、`PackTabAdapter`、`EndOfPackPullDetector`、`PanelNavigationTest`；QQ 真机待验证 |
-| HOOK-006 | QQ“添加到 EmoRepo”目标列表上方显示等比居中的消息首图预览 | `architecture/qq-panel.md` | implemented | `EmoRepoImportDialog`、`EmoRepoMessageMenuHook`；QQ 真机待验证 |
+| HOOK-005 | QQ 面板将折叠包连续置于分页末尾、在同一包栏内展开，并支持网格到底后继续上拖循环切包 | `architecture/qq-panel.md` | implemented | `PanelNavigation`、`PackTabAdapter`、`EndOfPackPullDetector`、`PanelNavigationTest`；最近→下一包及末包→最近循环真机通过，真实折叠包同栏展开待验收 |
+| HOOK-006 | QQ“添加到 EmoRepo”目标列表上方显示等比居中的消息首图预览 | `architecture/qq-panel.md` | verified | `EmoRepoImportDialog`、`EmoRepoMessageMenuHook`；CPH2609 在“洛”中首图等比居中预览、取消不导入且无错误日志真机验收 |
