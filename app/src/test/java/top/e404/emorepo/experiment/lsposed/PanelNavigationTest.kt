@@ -1,8 +1,6 @@
 package top.e404.emorepo.experiment.lsposed
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PanelNavigationTest {
@@ -20,13 +18,6 @@ class PanelNavigationTest {
             listOf("recent", "b", "d", "a", "c"),
             orderPanelPacksForBrowsing(packs).map(PanelPack::id),
         )
-    }
-
-    @Test
-    fun `next pack loops from last to first`() {
-        assertEquals(2, nextPanelPackIndex(1, 4))
-        assertEquals(0, nextPanelPackIndex(3, 4))
-        assertEquals(0, nextPanelPackIndex(0, 1))
     }
 
     @Test
@@ -56,22 +47,11 @@ class PanelNavigationTest {
     }
 
     @Test
-    fun `pull only triggers once after extra vertical distance at bottom`() {
-        val detector = EndOfPackPullDetector(72f)
-        detector.onDown(atEnd = false, x = 100f, y = 300f)
-        assertFalse(detector.onMove(atEnd = false, x = 100f, y = 180f))
-        assertFalse(detector.onMove(atEnd = true, x = 100f, y = 170f))
-        assertFalse(detector.onMove(atEnd = true, x = 100f, y = 110f))
-        assertTrue(detector.onMove(atEnd = true, x = 100f, y = 90f))
-        assertFalse(detector.onMove(atEnd = true, x = 100f, y = 0f))
-    }
+    fun `scroll state preserves offset and clamps position after item removal`() {
+        val state = PanelGridScrollState(firstVisiblePosition = 20, topOffset = -18)
 
-    @Test
-    fun `horizontal motion does not trigger next pack`() {
-        val detector = EndOfPackPullDetector(72f)
-        detector.onDown(atEnd = true, x = 100f, y = 300f)
-
-        assertFalse(detector.onMove(atEnd = true, x = 220f, y = 220f))
+        assertEquals(PanelGridScrollState(9, -18), normalizePanelGridScrollState(state, itemCount = 10))
+        assertEquals(null, normalizePanelGridScrollState(state, itemCount = 0))
     }
 
     private fun pack(id: String, collapsed: Boolean = false) = PanelPack(

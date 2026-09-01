@@ -88,6 +88,7 @@ internal class EmoRepoPanelDialog private constructor(
     private val sending = AtomicBoolean(false)
     private val imageLoader = panelImageLoader(hostContext)
     private val visiblePages = mutableMapOf<String, PackPage>()
+    private val packScrollStates = mutableMapOf<String, PanelGridScrollState>()
     private var revision = 0L
     private var packs: List<PanelPack> = emptyList()
     private var panelColumns = DEFAULT_PANEL_COLUMNS
@@ -320,14 +321,6 @@ internal class EmoRepoPanelDialog private constructor(
         tabAdapter?.select(position)
         tabAdapter?.tabPositionForPack(position)?.let(packTabs::smoothScrollToPosition)
         mainHandler.post { updatePreviewPreload(packs.getOrNull(position)?.id) }
-    }
-
-    private fun selectNextPackFromGridEnd() {
-        val next = nextPanelPackIndex(pager.currentItem, packs.size)
-        if (next == pager.currentItem) return
-        selectPack(next, smoothScroll = true)
-        val nextPackId = packs.getOrNull(next)?.id ?: return
-        mainHandler.post { visiblePages[nextPackId]?.scrollToTop() }
     }
 
     private fun updatePreviewPreload(selectedPackId: String?) {
@@ -771,7 +764,6 @@ internal class EmoRepoPanelDialog private constructor(
         private var touchPreviewActive = false
         private var touchPreviewPosition = GridView.INVALID_POSITION
         private var previewEndedAt = 0L
-        private val endPullDetector = EndOfPackPullDetector(dp(NEXT_PACK_PULL_DP).toFloat())
 
         init {
             grid.numColumns = panelColumns
@@ -788,28 +780,7 @@ internal class EmoRepoPanelDialog private constructor(
                 itemAdapter?.getItem(position)?.let(::send)
             }
             grid.setOnTouchListener { _, event ->
-                if (!touchPreviewActive) {
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> endPullDetector.onDown(
-                            atEnd = !grid.canScrollVertically(1),
-                            x = event.x,
-                            y = event.y,
-                        )
-                        MotionEvent.ACTION_MOVE -> {
-                            if (
-                                endPullDetector.onMove(
-                                    atEnd = !grid.canScrollVertically(1),
-                                    x = event.x,
-                                    y = event.y,
-                                )
-                            ) {
-                                selectNextPackFromGridEnd()
-                            }
-                        }
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> endPullDetector.reset()
-                    }
-                    return@setOnTouchListener false
-                }
+                if (!touchPreviewActive) return@setOnTouchListener false
                 when (event.actionMasked) {
                     MotionEvent.ACTION_MOVE -> {
                         val position = grid.pointToPosition(event.x.toInt(), event.y.toInt())
@@ -831,7 +802,6 @@ internal class EmoRepoPanelDialog private constructor(
             grid.setOnItemLongClickListener { _, _, position, _ ->
                 if (boundPack == null) return@setOnItemLongClickListener true
                 val item = itemAdapter?.getItem(position) ?: return@setOnItemLongClickListener true
-                endPullDetector.reset()
                 touchPreviewActive = true
                 touchPreviewPosition = position
                 touchPreviewOwner = this
@@ -898,6 +868,7 @@ internal class EmoRepoPanelDialog private constructor(
         }
 
         private fun showItems(pack: PanelPack, items: List<PanelItem>) {
+            saveScrollState()
             stopPreviewPreload()
             itemAdapter?.dispose()
             itemAdapter = null
@@ -912,6 +883,7 @@ internal class EmoRepoPanelDialog private constructor(
             } else {
                 itemAdapter = ItemAdapter(items, pageActive).also { grid.adapter = it }
                 showGrid()
+                restoreScrollState(pack.id, items.size)
                 if (pageActive) {
                     startPreviewPreload()
                 }
@@ -923,10 +895,6 @@ internal class EmoRepoPanelDialog private constructor(
             pageActive = active
             itemAdapter?.setFullContentEnabled(active)
             if (active) startPreviewPreload() else stopPreviewPreload()
-        }
-
-        fun scrollToTop() {
-            grid.setSelection(0)
         }
 
         fun startPreviewPreload() {
@@ -968,7 +936,7 @@ internal class EmoRepoPanelDialog private constructor(
 
         fun dispose() {
             generation += 1
-            endPullDetector.reset()
+            saveScrollState()
             stopPreviewPreload()
             finishTouchPreview("页面释放")
             boundPack?.let { visiblePages.remove(it.id, this) }
@@ -977,6 +945,22 @@ internal class EmoRepoPanelDialog private constructor(
             itemAdapter?.dispose()
             itemAdapter = null
             grid.adapter = null
+        }
+
+        private fun saveScrollState() {
+            val packId = boundPack?.id ?: return
+            if (grid.adapter == null || grid.count <= 0) return
+            val first = grid.firstVisiblePosition
+            if (first == GridView.INVALID_POSITION) return
+            val top = grid.getChildAt(0)?.top ?: grid.paddingTop
+            packScrollStates[packId] = PanelGridScrollState(first, top)
+        }
+
+        private fun restoreScrollState(packId: String, itemCount: Int) {
+            val state = packScrollStates[packId]
+                ?.let { normalizePanelGridScrollState(it, itemCount) }
+                ?: return
+            grid.setSelectionFromTop(state.firstVisiblePosition, state.topOffset)
         }
 
         private fun finishTouchPreview(reason: String) {
@@ -1493,7 +1477,6 @@ internal class EmoRepoPanelDialog private constructor(
         private const val IMAGE_MEMORY_CACHE_BYTES = 128L * 1024L * 1024L
         private const val PREVIEW_SIZE_PX = 1024
         private const val PREVIEW_CLICK_SUPPRESSION_MS = 350L
-        private const val NEXT_PACK_PULL_DP = 72
         private const val PRELOAD_VISIBLE_ROWS = 8
         private const val DRAWER_CLOSE_RATIO = 0.22f
         private const val DRAWER_CLOSE_VELOCITY = 1_200f
