@@ -318,7 +318,7 @@ class EmoRepoContentProvider : ContentProvider() {
         } finally {
             descriptors.forEach { descriptor -> runCatching { descriptor.close() } }
         }
-        val result = ManagementBatchResult(itemResults).also(::scheduleImportSyncIfNeeded)
+        val result = ManagementBatchResult(itemResults).also(::handleImportResult)
         return Bundle().apply {
             putInt(
                 EmoRepoIpcContract.RESULT_SUCCESS_COUNT,
@@ -336,12 +336,14 @@ class EmoRepoContentProvider : ContentProvider() {
     }
 
     private fun importCandidates(packId: String, candidates: List<ImportCandidate>) =
-        repository.import(packId, candidates).also(::scheduleImportSyncIfNeeded)
+        repository.import(packId, candidates).also(::handleImportResult)
 
-    private fun scheduleImportSyncIfNeeded(result: ManagementBatchResult) {
+    private fun handleImportResult(result: ManagementBatchResult) {
         val appContext = requireNotNull(context).applicationContext
         val settings = SettingsStore(appContext).load()
-        if (result.items.any { it.status == ManagementStatus.SUCCESS }) {
+        val repositoryChanged = result.items.any { it.status == ManagementStatus.SUCCESS }
+        if (repositoryChanged) {
+            appContext.contentResolver.notifyChange(EmoRepoIpcContract.REVISION_URI, null)
             GitSyncScheduler.requestAfterModification(appContext)
         }
         DiagnosticLogger.info(
@@ -351,6 +353,7 @@ class EmoRepoContentProvider : ContentProvider() {
                 "successCount" to result.items.count { it.status == ManagementStatus.SUCCESS },
                 "duplicateCount" to result.items.count { it.status == ManagementStatus.DUPLICATE },
                 "failureCount" to result.items.count { it.status == ManagementStatus.FAILED },
+                "repositoryChangeNotified" to repositoryChanged,
             ),
         )
     }

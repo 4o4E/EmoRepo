@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -66,7 +65,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 
 enum class PackLayout { LIST, GRID }
 
-private const val COLLAPSED_HEADER_KEY = "\u0000collapsed-packs-header"
+private const val COLLAPSED_PACK_KEY = "\u0000collapsed-packs"
 private const val CREATE_PACK_KEY = "\u0000create-pack"
 
 @Composable
@@ -315,9 +314,8 @@ private fun PackCollection(
                     )
                 }
                 if (collapsedPacks.isNotEmpty()) {
-                    item(key = COLLAPSED_HEADER_KEY) {
-                        CollapsedPacksHeader(
-                            count = collapsedPacks.size,
+                    item(key = COLLAPSED_PACK_KEY) {
+                        CollapsedPackListCard(
                             expanded = collapsedExpanded,
                             onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
                         )
@@ -373,9 +371,8 @@ private fun PackCollection(
                     }
                 }
                 if (!editing && collapsedPacks.isNotEmpty()) {
-                    item(key = COLLAPSED_HEADER_KEY) {
-                        CollapsedPacksHeader(
-                            count = collapsedPacks.size,
+                    item(key = COLLAPSED_PACK_KEY) {
+                        CollapsedPackListCard(
                             expanded = collapsedExpanded,
                             onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
                         )
@@ -423,12 +420,8 @@ private fun PackCollection(
                     )
                 }
                 if (collapsedPacks.isNotEmpty()) {
-                    item(
-                        key = COLLAPSED_HEADER_KEY,
-                        span = { GridItemSpan(maxLineSpan) },
-                    ) {
-                        CollapsedPacksHeader(
-                            count = collapsedPacks.size,
+                    item(key = COLLAPSED_PACK_KEY) {
+                        CollapsedPackGridCard(
                             expanded = collapsedExpanded,
                             onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
                         )
@@ -486,12 +479,8 @@ private fun PackCollection(
                     }
                 }
                 if (!editing && collapsedPacks.isNotEmpty()) {
-                    item(
-                        key = COLLAPSED_HEADER_KEY,
-                        span = { GridItemSpan(maxLineSpan) },
-                    ) {
-                        CollapsedPacksHeader(
-                            count = collapsedPacks.size,
+                    item(key = COLLAPSED_PACK_KEY) {
+                        CollapsedPackGridCard(
                             expanded = collapsedExpanded,
                             onClick = { onCollapsedExpandedChange(!collapsedExpanded) },
                         )
@@ -651,23 +640,71 @@ private fun CreatePackGridCard(onClick: () -> Unit) {
 }
 
 @Composable
-private fun CollapsedPacksHeader(
-    count: Int,
+private fun CollapsedPackListCard(
     expanded: Boolean,
     onClick: () -> Unit,
 ) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = if (expanded) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceVariant,
+        ),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("已折叠 $count 个表情包", modifier = Modifier.weight(1f))
-            Text(if (expanded) "收起 ▲" else "展开 ▼")
+            CollapsedPackCover(Modifier.size(64.dp), expanded)
+            Text(
+                "折叠",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
         }
+    }
+}
+
+@Composable
+private fun CollapsedPackGridCard(
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(onClick = onClick) {
+        Column(Modifier.fillMaxWidth()) {
+            CollapsedPackCover(Modifier.fillMaxWidth().aspectRatio(1f), expanded)
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .background(
+                        if (expanded) MaterialTheme.colorScheme.primary
+                        else Color.Black.copy(alpha = 0.72f),
+                    )
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "折叠",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsedPackCover(modifier: Modifier, expanded: Boolean) {
+    Box(
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_archive),
+            contentDescription = if (expanded) "收起折叠表情包" else "展开折叠表情包",
+            tint = if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(40.dp),
+        )
     }
 }
 

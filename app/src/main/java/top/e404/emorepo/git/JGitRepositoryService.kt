@@ -63,23 +63,27 @@ class JGitRepositoryService : GitRepositoryService {
         observer: GitSyncObserver,
     ): GitSyncResult {
         val root = repositoryDirectory.canonicalFile
-        return RepositoryLocks.forRoot(root).withLock {
+        val contentLock = RepositoryLocks.forRoot(root)
+        return RepositoryLocks.forSync(root).withLock {
             Git.open(root).use { git ->
                 val repository = git.repository
                 require(!repository.isBare) { "不支持 bare 仓库" }
-                if (repository.repositoryState.isRebasing) {
-                    git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
-                }
-                traced(observer, GitSyncStage.PRECHECK) {
-                    require(repository.repositoryState == RepositoryState.SAFE) {
-                        "仓库处于未完成状态: ${repository.repositoryState.description}"
+                var committed = contentLock.withLock {
+                    if (repository.repositoryState.isRebasing) {
+                        git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
                     }
-                    recoverStaleIndexLock(repository, observer)
+                    traced(observer, GitSyncStage.PRECHECK) {
+                        require(repository.repositoryState == RepositoryState.SAFE) {
+                            "仓库处于未完成状态: ${repository.repositoryState.description}"
+                        }
+                        recoverStaleIndexLock(repository, observer)
+                    }
+                    commitLocalChanges(git, settings, observer)
                 }
                 val warnings = mutableListOf<String>()
-                val committed = commitLocalChanges(git, settings, observer)
                 val provider = credentials(token)
 
+                // fetch 只修改 Git 对象和远端引用，不能用网络等待占住表情内容锁。
                 traced(observer, GitSyncStage.FETCH) {
                     val fetch = git.fetch().setRemote(DEFAULT_REMOTE)
                     provider?.let(fetch::setCredentialsProvider)
@@ -89,22 +93,27 @@ class JGitRepositoryService : GitRepositoryService {
                 val branch = repository.branch
                 val upstream = BranchConfig(repository.config, branch).trackingBranch
                     ?: "$REMOTE_PREFIX$branch"
-                traced(observer, GitSyncStage.REBASE, mapOf("branch" to branch)) {
-                    var result = git.rebase().setUpstream(upstream).call()
-                    while (result.status == RebaseResult.Status.STOPPED) {
-                        warnings += resolveStoppedRebase(git)
-                        result = git.rebase().setOperation(RebaseCommand.Operation.CONTINUE).call()
+                contentLock.withLock {
+                    // fetch 期间允许本地写入；rebase 前补提一次，避免带脏工作树进入 rebase。
+                    committed = commitLocalChanges(git, settings, observer) || committed
+                    traced(observer, GitSyncStage.REBASE, mapOf("branch" to branch)) {
+                        var result = git.rebase().setUpstream(upstream).call()
+                        while (result.status == RebaseResult.Status.STOPPED) {
+                            warnings += resolveStoppedRebase(git)
+                            result = git.rebase().setOperation(RebaseCommand.Operation.CONTINUE).call()
+                        }
+                        if (!result.status.isSuccessful) {
+                            git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
+                            throw ProtocolException("rebase 失败: ${result.status}")
+                        }
                     }
-                    if (!result.status.isSuccessful) {
-                        git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
-                        throw ProtocolException("rebase 失败: ${result.status}")
+                    traced(observer, GitSyncStage.VALIDATE) {
+                        // 根索引存在时必须与 rebase 后的实际表情包目录严格一致。
+                        EmoticonRepository(root).listPacks()
                     }
-                }
-                traced(observer, GitSyncStage.VALIDATE) {
-                    // 根索引存在时必须与 rebase 后的实际表情包目录严格一致。
-                    EmoticonRepository(root).listPacks()
                 }
 
+                // push 只上传已经提交的对象；期间新增的工作树修改由下一次同步处理。
                 traced(observer, GitSyncStage.PUSH) {
                     val push = git.push().setRemote(DEFAULT_REMOTE)
                     provider?.let(push::setCredentialsProvider)

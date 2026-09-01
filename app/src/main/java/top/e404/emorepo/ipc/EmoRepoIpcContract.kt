@@ -13,6 +13,7 @@ object EmoRepoIpcContract {
     const val PATH_PACKS = "packs"
     const val PATH_ITEMS = "items"
     const val PATH_ITEM = "item"
+    val REVISION_URI: Uri = BASE_URI.buildUpon().appendPath(PATH_REVISION).build()
 
     const val METHOD_RECORD_USE = "record_use"
     const val METHOD_IMPORT_ITEM = "import_item"

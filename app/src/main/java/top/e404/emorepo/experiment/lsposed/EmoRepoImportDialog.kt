@@ -43,6 +43,7 @@ internal class EmoRepoImportDialog private constructor(
     private val surfaceColor = if (dark) Color.rgb(38, 38, 42) else Color.WHITE
     private val accentColor = if (dark) Color.rgb(58, 125, 205) else Color.rgb(35, 112, 210)
     private val rowColor = if (dark) Color.rgb(49, 49, 54) else Color.rgb(246, 247, 249)
+    private val badgeColor = if (dark) Color.rgb(64, 77, 94) else Color.rgb(225, 235, 248)
     private val imageLoader = importImageLoader(context)
     private val dialog = Dialog(context)
     private val content = LinearLayout(context)
@@ -134,12 +135,7 @@ internal class EmoRepoImportDialog private constructor(
         val text = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
-            addView(TextView(context).apply {
-                this.text = pack.displayName
-                textSize = 17f
-                setTextColor(foregroundColor)
-                maxLines = 1
-            })
+            addView(packNameRow(pack, 17f))
             addView(TextView(context).apply {
                 text = "现有 ${pack.itemCount} 张 · 将导入 $pictureCount 张"
                 textSize = 13f
@@ -265,6 +261,32 @@ internal class EmoRepoImportDialog private constructor(
         setOnClickListener { action() }
     }
 
+    private fun packNameRow(pack: PanelPack, nameSize: Float) = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(TextView(context).apply {
+            text = pack.displayName
+            textSize = nameSize
+            setTextColor(foregroundColor)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (pack.collapsed) {
+            addView(collapsedBadge(), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginStart = dp(6) })
+        }
+    }
+
+    private fun collapsedBadge() = TextView(context).apply {
+        text = "已折叠"
+        textSize = 11f
+        setTextColor(accentColor)
+        setPadding(dp(6), dp(2), dp(6), dp(2))
+        background = roundedBackground(badgeColor, dp(8).toFloat())
+    }
+
     private inner class PackAdapter(
         private val items: List<PanelPack>,
         private val onClick: (PanelPack) -> Unit,
@@ -290,7 +312,9 @@ internal class EmoRepoImportDialog private constructor(
         private val row = itemView as LinearLayout
         private val cover = row.getChildAt(0) as ImageView
         private val labels = row.getChildAt(1) as LinearLayout
-        private val name = labels.getChildAt(0) as TextView
+        private val nameRow = labels.getChildAt(0) as LinearLayout
+        private val name = nameRow.getChildAt(0) as TextView
+        private val collapsed = nameRow.getChildAt(1) as TextView
         private val count = labels.getChildAt(1) as TextView
         private var coverRequest: Disposable? = null
 
@@ -299,6 +323,7 @@ internal class EmoRepoImportDialog private constructor(
             cover.setImageResource(android.R.drawable.ic_menu_gallery)
             cover.contentDescription = "${pack.displayName} 封面"
             name.text = pack.displayName
+            collapsed.visibility = if (pack.collapsed) View.VISIBLE else View.GONE
             count.text = "${pack.itemCount} 张表情"
             row.setOnClickListener { onClick(pack) }
             coverRequest = loadCover(cover, pack, PACK_COVER_SIZE_DP)
@@ -326,10 +351,19 @@ internal class EmoRepoImportDialog private constructor(
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), 0, 0, 0)
-            addView(TextView(context).apply {
-                textSize = 16f
-                setTextColor(foregroundColor)
-                maxLines = 1
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(context).apply {
+                    textSize = 16f
+                    setTextColor(foregroundColor)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(collapsedBadge(), LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginStart = dp(6) })
             })
             addView(TextView(context).apply {
                 textSize = 13f

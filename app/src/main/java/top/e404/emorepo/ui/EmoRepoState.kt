@@ -2,8 +2,11 @@ package top.e404.emorepo.ui
 
 import android.content.Context
 import android.app.Application
+import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.core.content.edit
 import androidx.compose.runtime.Composable
@@ -34,6 +37,7 @@ import top.e404.emorepo.git.GitRepositoryService
 import top.e404.emorepo.git.GitSyncExecutor
 import top.e404.emorepo.git.GitSyncScheduler
 import top.e404.emorepo.git.JGitRepositoryService
+import top.e404.emorepo.ipc.EmoRepoIpcContract
 import top.e404.emorepo.repository.EmoticonPack
 import top.e404.emorepo.repository.EmoticonRepository
 import top.e404.emorepo.repository.ImportCandidate
@@ -56,6 +60,12 @@ class EmoRepoState(
     private val tokenStore = KeystoreTokenStore(context)
     private val gitService: GitRepositoryService = JGitRepositoryService()
     private val uiPreferences = context.getSharedPreferences("ui", Context.MODE_PRIVATE)
+    private val repositoryChangeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean, uri: Uri?) {
+            refreshRepositoryContent()
+        }
+    }
+    private var initialReloadRequested = false
 
     val repository = EmoticonRepository(repositoryDirectory)
 
@@ -83,6 +93,23 @@ class EmoRepoState(
     val setupRequired: Boolean
         get() = !settings.setupComplete || !repositoryConfigured
 
+    init {
+        context.contentResolver.registerContentObserver(
+            EmoRepoIpcContract.REVISION_URI,
+            false,
+            repositoryChangeObserver,
+        )
+    }
+
+    fun onForeground() {
+        if (!initialReloadRequested) {
+            initialReloadRequested = true
+            reload()
+        } else {
+            refreshRepositoryContent()
+        }
+    }
+
     fun reload() {
         scope.launch {
             busy = true
@@ -105,6 +132,32 @@ class EmoRepoState(
             busy = false
             if (!setupRequired) GitSyncScheduler.requestImmediate(context)
         }
+    }
+
+    private fun refreshRepositoryContent() {
+        if (setupRequired) return
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { repository.listPacks() } }
+            result.onSuccess {
+                packs = it
+                DiagnosticLogger.info(
+                    "ui_state",
+                    "repository_change_applied",
+                    fields = mapOf("packCount" to it.size),
+                )
+            }.onFailure { error ->
+                DiagnosticLogger.error(
+                    "ui_state",
+                    "repository_change_refresh_failed",
+                    "QQ 导入后刷新仓库失败",
+                    error = error,
+                )
+            }
+        }
+    }
+
+    fun close() {
+        context.contentResolver.unregisterContentObserver(repositoryChangeObserver)
     }
 
     fun completeSetup(input: SetupInput, token: String) {
@@ -560,6 +613,11 @@ fun rememberEmoRepoState(): EmoRepoState {
 
 class EmoRepoStateViewModel(application: Application) : AndroidViewModel(application) {
     val state = EmoRepoState(application.applicationContext, viewModelScope)
+
+    override fun onCleared() {
+        state.close()
+        super.onCleared()
+    }
 }
 
 private fun Context.displayName(uri: Uri): String {

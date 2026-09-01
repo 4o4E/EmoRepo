@@ -1,6 +1,9 @@
 package top.e404.emorepo.git
 
 import java.io.File
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.PersonIdent
 import org.junit.Assert.assertEquals
@@ -14,6 +17,7 @@ import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.protocol.index.IndexJsonlCodec
 import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
+import top.e404.emorepo.repository.RepositoryLocks
 
 class JGitRepositoryServiceTest {
     @get:Rule
@@ -32,6 +36,40 @@ class JGitRepositoryServiceTest {
         val verification = File(temporaryFolder.root, "verification")
         Git.cloneRepository().setURI(remote.toURI().toString()).setDirectory(verification).call().close()
         assertEquals("local", File(verification, "local-change.txt").readText())
+    }
+
+    @Test
+    fun `network fetch releases content lock and captures concurrent local change`() {
+        val remote = createRemoteWithInitialCommit()
+        val local = clone(remote, "fetch-concurrent-local")
+        val lockProbe = Executors.newSingleThreadExecutor()
+        var wroteDuringFetch = false
+
+        try {
+            val result = JGitRepositoryService().sync(local, settings(), token = null) { event ->
+                if (event.stage == GitSyncStage.FETCH && event.outcome == GitSyncStageOutcome.STARTED) {
+                    val readable = lockProbe.submit(Callable {
+                        val lock = RepositoryLocks.forRoot(local)
+                        if (!lock.tryLock(1, TimeUnit.SECONDS)) return@Callable false
+                        try {
+                            File(local, "during-fetch.txt").writeText("available")
+                            true
+                        } finally {
+                            lock.unlock()
+                        }
+                    }).get(2, TimeUnit.SECONDS)
+                    assertTrue("fetch 不应占用仓库内容锁", readable)
+                    wroteDuringFetch = true
+                }
+            }
+
+            assertTrue(wroteDuringFetch)
+            assertTrue(result.committed)
+            val verification = clone(remote, "fetch-concurrent-verification")
+            assertEquals("available", File(verification, "during-fetch.txt").readText())
+        } finally {
+            lockProbe.shutdownNow()
+        }
     }
 
     @Test

@@ -5,9 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.app.PendingIntent
 import android.content.res.Configuration
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.PixelFormat
 import android.graphics.drawable.Animatable
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
@@ -585,7 +590,6 @@ internal class EmoRepoPanelDialog private constructor(
     private inner class PackTabAdapter(
         private val items: List<PanelPack>,
     ) : RecyclerView.Adapter<PackTabHolder>() {
-        private val collapsedCount = items.count(PanelPack::collapsed)
         private var collapsedExpanded = false
         private var selectedPackPosition = RecyclerView.NO_POSITION
         private val holders = mutableSetOf<PackTabHolder>()
@@ -604,7 +608,6 @@ internal class EmoRepoPanelDialog private constructor(
                 }
                 PanelTabEntry.Collapsed -> {
                     holder.bindCollapsed(
-                        count = collapsedCount,
                         expanded = collapsedExpanded,
                         selected = !collapsedExpanded && items.getOrNull(selectedPackPosition)?.collapsed == true,
                         onClick = ::toggleCollapsedEntries,
@@ -684,12 +687,12 @@ internal class EmoRepoPanelDialog private constructor(
             container.setOnClickListener { onClick() }
         }
 
-        fun bindCollapsed(count: Int, expanded: Boolean, selected: Boolean, onClick: () -> Unit) {
+        fun bindCollapsed(expanded: Boolean, selected: Boolean, onClick: () -> Unit) {
             disposable?.dispose()
             disposable = null
-            cover.setImageResource(android.R.drawable.ic_menu_more)
+            cover.setImageDrawable(ArchiveIconDrawable(foregroundColor))
             cover.contentDescription = if (expanded) "收起折叠表情包" else "展开折叠表情包"
-            name.text = if (expanded) "收起 $count" else "折叠 $count"
+            name.text = "折叠"
             container.background = roundedBackground(
                 if (selected) selectedColor else Color.TRANSPARENT,
                 dp(12).toFloat(),
@@ -1412,6 +1415,62 @@ internal class EmoRepoPanelDialog private constructor(
     private fun roundedBackground(color: Int, radius: Float) = GradientDrawable().apply {
         setColor(color)
         cornerRadius = radius
+    }
+
+    /** 模块资源不能通过 QQ 的 Context 解析，因此直接绘制稳定的归档图标。 */
+    private class ArchiveIconDrawable(color: Int) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+
+        override fun draw(canvas: Canvas) {
+            val scale = minOf(bounds.width(), bounds.height()) / 24f
+            if (scale <= 0f) return
+            paint.strokeWidth = 2f * scale
+            val left = bounds.centerX() - 12f * scale
+            val top = bounds.centerY() - 12f * scale
+            canvas.drawRoundRect(
+                left + 5f * scale,
+                top + 8f * scale,
+                left + 19f * scale,
+                top + 20f * scale,
+                1f * scale,
+                1f * scale,
+                paint,
+            )
+            canvas.drawRoundRect(
+                left + 3f * scale,
+                top + 4f * scale,
+                left + 21f * scale,
+                top + 8f * scale,
+                1f * scale,
+                1f * scale,
+                paint,
+            )
+            canvas.drawLine(
+                left + 9f * scale,
+                top + 13f * scale,
+                left + 15f * scale,
+                top + 13f * scale,
+                paint,
+            )
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+            invalidateSelf()
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            paint.colorFilter = colorFilter
+            invalidateSelf()
+        }
+
+        @Deprecated("Android Drawable 兼容接口")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
 
     companion object {

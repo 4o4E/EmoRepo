@@ -33,6 +33,7 @@ EmoRepo LSPosed 适配代码运行在 QQ UID 下，不能直接访问上述私�
 - 对 QQ 包进一步校验签名证书摘要，避免同包名伪装。
 - 不向调用方暴露仓库绝对路径、Git 目录或 Token。
 - Provider 不直接执行 Git 操作；最近使用写入完成后只按设置提交 WorkManager 同步任务。
+- Provider 的只读元数据查询不得等待 Git fetch、push 等网络阶段；后台同步只在会改变或校验工作树的短本地阶段占用同一仓库内容锁。
 
 Manifest 已导出 Provider，查询、文件打开、导入、最近使用和定位缓存调用均先完成调用方校验。真机已验证 QQ UID 可读取和导入、shell UID 被拒绝；真实发送后的最近使用写入尚待验收。
 

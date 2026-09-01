@@ -11,10 +11,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -35,7 +35,10 @@ fun EmoRepoApp() {
     val state = rememberEmoRepoState()
     val navController = rememberNavController()
 
-    LaunchedEffect(Unit) { state.reload() }
+    LifecycleResumeEffect(state) {
+        state.onForeground()
+        onPauseOrDispose { }
+    }
     if (state.setupRequired) {
         Surface(Modifier.fillMaxSize()) { OnboardingScreen(state) }
         return

@@ -69,6 +69,9 @@
 | RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `v0.3.1` `release-index.json` 的 tag/commit/版本/五 ABI/尺寸/SHA-256/证书/下载地址独立验收 |
 | DIAG-001 | App、同步和 QQ Hook 生成脱敏轮转文件日志，并可导出诊断 ZIP | `diagnostics/logging.md` | verified | `DiagnosticLogger`、`DiagnosticLogStore`、`QqDiagnosticBridge`、`DiagnosticExporter`；102 项 JVM 测试，0.3.1 真机 App/QQ 文件日志、系统导出和 ZIP 隐私检查通过 |
 | SYNC-005 | 同步按阶段记录完整异常，并安全恢复陈旧 Git 索引锁 | `diagnostics/logging.md` | verified | `GitSyncExecutor`、`JGitRepositoryService`；陈旧锁恢复/损坏索引保留 JVM 测试，0.3.1 真机恢复 23.7 小时旧锁并完成 add/fetch/rebase/校验/push |
-| HOOK-005 | QQ 面板将折叠包连续置于分页末尾并在同一包栏内展开；横向分页首尾循环且恢复各包网格滚动位置 | `architecture/qq-panel.md` | implemented | `PanelNavigation`、`PackTabAdapter`、`StatefulGridView`、`PanelNavigationTest`；横向首尾循环、纵向不切包和循环后滚动行恢复真机通过，真实折叠包同栏展开待验收 |
+| HOOK-005 | QQ 面板将折叠包连续置于分页末尾并在同一包栏内展开；横向分页首尾循环且恢复各包网格滚动位置 | `architecture/qq-panel.md` | verified | `PanelNavigation`、`PackTabAdapter`、`StatefulGridView`、`PanelNavigationTest`；横向首尾循环、纵向不切包、循环后滚动行恢复及真实“测试折叠”同栏展开真机通过 |
 | HOOK-006 | QQ“添加到 EmoRepo”目标列表上方显示等比居中的消息首图预览 | `architecture/qq-panel.md` | verified | `EmoRepoImportDialog`、`EmoRepoMessageMenuHook`；CPH2609 在“洛”中首图等比居中预览、取消不导入且无错误日志真机验收 |
 | UI-023 | 表情包长按可切换折叠，主页隐藏数量并完整显示名称，详情显示数量，新建框自动聚焦且成功提示缩短 | `ui/app.md` | implemented | `PackListScreen`、`PackListCard`、`PackGridCard`、`PackNameDialog`、`PackManagerScreen`、`EmoRepoState`；真机待验证 |
+| UI-024 | App 和 QQ 将折叠区显示为带归档图标的虚拟“折叠”表情包，并在 QQ 导入成功后刷新 App 仓库内容 | `ui/app.md`、`architecture/qq-panel.md` | verified | `PackCollection`、`ArchiveIconDrawable`、`EmoRepoContentProvider`、`EmoRepoState`；App 列表/平铺折叠入口、QQ 同栏展开及同进程导入后 1→2 张即时刷新真机通过 |
+| HOOK-007 | QQ“添加到 EmoRepo”的目标列表和确认摘要标记已折叠表情包 | `architecture/qq-panel.md` | verified | `EmoRepoImportDialog`；“测试折叠”目标行和确认摘要“已折叠”徽标真机通过，取消未导入 |
+| SYNC-006 | Git 网络阶段不占用仓库内容锁，网络失败或等待不阻塞 App/QQ 只读访问 | `git/sync.md`、`android/runtime.md` | verified | `RepositoryLocks`、`JGitRepositoryService`、`JGitRepositoryServiceTest`；fetch 并发写入补提交 JVM 测试及真机 fetch 等待中 Provider 约 7 ms 查询通过 |
