@@ -12,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Parcelable
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
@@ -21,11 +22,11 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
-import android.widget.AbsListView
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.ImageView
+import android.widget.AbsListView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -88,7 +89,7 @@ internal class EmoRepoPanelDialog private constructor(
     private val sending = AtomicBoolean(false)
     private val imageLoader = panelImageLoader(hostContext)
     private val visiblePages = mutableMapOf<String, PackPage>()
-    private val packScrollStates = mutableMapOf<String, PanelGridScrollState>()
+    private val packScrollStates = mutableMapOf<String, Parcelable>()
     private var revision = 0L
     private var packs: List<PanelPack> = emptyList()
     private var panelColumns = DEFAULT_PANEL_COLUMNS
@@ -99,6 +100,9 @@ internal class EmoRepoPanelDialog private constructor(
     private var previewGeneration = 0
     private var previewDisposable: Disposable? = null
     private var touchPreviewOwner: PackPage? = null
+    private var pagerTouchDownX = 0f
+    private var pagerTouchDownY = 0f
+    private var pagerTouchStartPosition = 0
 
     fun show() {
         buildContent()
@@ -157,6 +161,14 @@ internal class EmoRepoPanelDialog private constructor(
 
         val content = FrameLayout(hostContext)
         pager.offscreenPageLimit = 1
+        (pager.getChildAt(0) as? RecyclerView)?.addOnItemTouchListener(
+            object : RecyclerView.SimpleOnItemTouchListener() {
+                override fun onInterceptTouchEvent(recyclerView: RecyclerView, event: MotionEvent): Boolean {
+                    trackPagerLoopGesture(event)
+                    return false
+                }
+            },
+        )
         content.addView(
             pager,
             FrameLayout.LayoutParams(
@@ -320,13 +332,30 @@ internal class EmoRepoPanelDialog private constructor(
         lastSelectedPackId = packs[position].id
         tabAdapter?.select(position)
         tabAdapter?.tabPositionForPack(position)?.let(packTabs::smoothScrollToPosition)
-        mainHandler.post { updatePreviewPreload(packs.getOrNull(position)?.id) }
+        mainHandler.post { updatePreviewPreload(packs[position].id) }
+    }
+
+    private fun trackPagerLoopGesture(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                pagerTouchDownX = event.x
+                pagerTouchDownY = event.y
+                pagerTouchStartPosition = pager.currentItem
+            }
+            MotionEvent.ACTION_UP -> {
+                panelHorizontalLoopTarget(
+                    startPosition = pagerTouchStartPosition,
+                    packCount = packs.size,
+                    distanceX = event.x - pagerTouchDownX,
+                    distanceY = event.y - pagerTouchDownY,
+                    thresholdPixels = dp(PAGER_LOOP_SWIPE_DP).toFloat(),
+                )?.let { target -> selectPack(target, smoothScroll = false) }
+            }
+        }
     }
 
     private fun updatePreviewPreload(selectedPackId: String?) {
-        visiblePages.forEach { (packId, page) ->
-            page.setPageActive(packId == selectedPackId)
-        }
+        visiblePages.forEach { (packId, page) -> page.setPageActive(packId == selectedPackId) }
     }
 
     private fun canDragDrawer(touchY: Float): Boolean {
@@ -752,7 +781,7 @@ internal class EmoRepoPanelDialog private constructor(
     private inner class PackPageHolder(val page: PackPage) : RecyclerView.ViewHolder(page)
 
     private inner class PackPage(context: Context) : FrameLayout(context) {
-        private val grid = GridView(context)
+        private val grid = StatefulGridView(context)
         private val status = TextView(context)
         private val progress = ProgressBar(context)
         private var generation = 0
@@ -868,7 +897,7 @@ internal class EmoRepoPanelDialog private constructor(
         }
 
         private fun showItems(pack: PanelPack, items: List<PanelItem>) {
-            saveScrollState()
+            captureScrollState()
             stopPreviewPreload()
             itemAdapter?.dispose()
             itemAdapter = null
@@ -892,9 +921,15 @@ internal class EmoRepoPanelDialog private constructor(
 
         fun setPageActive(active: Boolean) {
             if (pageActive == active) return
+            if (pageActive) captureScrollState()
             pageActive = active
             itemAdapter?.setFullContentEnabled(active)
-            if (active) startPreviewPreload() else stopPreviewPreload()
+            if (active) {
+                boundPack?.let { pack -> restoreScrollState(pack.id, displayedItems.size) }
+                startPreviewPreload()
+            } else {
+                stopPreviewPreload()
+            }
         }
 
         fun startPreviewPreload() {
@@ -936,7 +971,7 @@ internal class EmoRepoPanelDialog private constructor(
 
         fun dispose() {
             generation += 1
-            saveScrollState()
+            captureScrollState()
             stopPreviewPreload()
             finishTouchPreview("页面释放")
             boundPack?.let { visiblePages.remove(it.id, this) }
@@ -947,20 +982,19 @@ internal class EmoRepoPanelDialog private constructor(
             grid.adapter = null
         }
 
-        private fun saveScrollState() {
+        private fun captureScrollState() {
             val packId = boundPack?.id ?: return
             if (grid.adapter == null || grid.count <= 0) return
-            val first = grid.firstVisiblePosition
-            if (first == GridView.INVALID_POSITION) return
-            val top = grid.getChildAt(0)?.top ?: grid.paddingTop
-            packScrollStates[packId] = PanelGridScrollState(first, top)
+            grid.captureScrollState()?.let { state -> packScrollStates[packId] = state }
         }
 
         private fun restoreScrollState(packId: String, itemCount: Int) {
-            val state = packScrollStates[packId]
-                ?.let { normalizePanelGridScrollState(it, itemCount) }
-                ?: return
-            grid.setSelectionFromTop(state.firstVisiblePosition, state.topOffset)
+            val state = packScrollStates[packId] ?: return
+            if (itemCount <= 0) return
+            grid.restoreScrollState(state)
+            grid.post {
+                if (boundPack?.id == packId && grid.adapter != null) grid.restoreScrollState(state)
+            }
         }
 
         private fun finishTouchPreview(reason: String) {
@@ -1256,6 +1290,14 @@ internal class EmoRepoPanelDialog private constructor(
         }
     }
 
+    private class StatefulGridView(context: Context) : GridView(context) {
+        fun captureScrollState(): Parcelable? = super.onSaveInstanceState()
+
+        fun restoreScrollState(state: Parcelable) {
+            super.onRestoreInstanceState(state)
+        }
+    }
+
     /** 只接管明确的纵向抽屉手势，避免和网格滚动、左右翻页冲突。 */
     private class DrawerDismissLayout(
         context: Context,
@@ -1477,6 +1519,7 @@ internal class EmoRepoPanelDialog private constructor(
         private const val IMAGE_MEMORY_CACHE_BYTES = 128L * 1024L * 1024L
         private const val PREVIEW_SIZE_PX = 1024
         private const val PREVIEW_CLICK_SUPPRESSION_MS = 350L
+        private const val PAGER_LOOP_SWIPE_DP = 72
         private const val PRELOAD_VISIBLE_ROWS = 8
         private const val DRAWER_CLOSE_RATIO = 0.22f
         private const val DRAWER_CLOSE_VELOCITY = 1_200f

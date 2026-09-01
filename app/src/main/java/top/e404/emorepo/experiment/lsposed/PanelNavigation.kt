@@ -26,13 +26,18 @@ internal fun panelTabEntries(items: List<PanelPack>, collapsedExpanded: Boolean)
     }
 }
 
-internal data class PanelGridScrollState(val firstVisiblePosition: Int, val topOffset: Int)
-
-internal fun normalizePanelGridScrollState(
-    state: PanelGridScrollState,
-    itemCount: Int,
-): PanelGridScrollState? = if (itemCount <= 0) {
-    null
-} else {
-    state.copy(firstVisiblePosition = state.firstVisiblePosition.coerceIn(0, itemCount - 1))
+internal fun panelHorizontalLoopTarget(
+    startPosition: Int,
+    packCount: Int,
+    distanceX: Float,
+    distanceY: Float,
+    thresholdPixels: Float,
+): Int? {
+    if (packCount <= 1 || kotlin.math.abs(distanceX) < thresholdPixels) return null
+    if (kotlin.math.abs(distanceX) <= kotlin.math.abs(distanceY)) return null
+    return when {
+        startPosition == 0 && distanceX > 0f -> packCount - 1
+        startPosition == packCount - 1 && distanceX < 0f -> 0
+        else -> null
+    }
 }

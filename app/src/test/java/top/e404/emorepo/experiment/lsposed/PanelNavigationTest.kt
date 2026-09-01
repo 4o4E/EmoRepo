@@ -47,11 +47,12 @@ class PanelNavigationTest {
     }
 
     @Test
-    fun `scroll state preserves offset and clamps position after item removal`() {
-        val state = PanelGridScrollState(firstVisiblePosition = 20, topOffset = -18)
-
-        assertEquals(PanelGridScrollState(9, -18), normalizePanelGridScrollState(state, itemCount = 10))
-        assertEquals(null, normalizePanelGridScrollState(state, itemCount = 0))
+    fun `horizontal outward swipe loops only at pager edges`() {
+        assertEquals(3, panelHorizontalLoopTarget(0, 4, 100f, 5f, 72f))
+        assertEquals(0, panelHorizontalLoopTarget(3, 4, -100f, 5f, 72f))
+        assertEquals(null, panelHorizontalLoopTarget(1, 4, 100f, 5f, 72f))
+        assertEquals(null, panelHorizontalLoopTarget(0, 4, 60f, 5f, 72f))
+        assertEquals(null, panelHorizontalLoopTarget(0, 4, 100f, 120f, 72f))
     }
 
     private fun pack(id: String, collapsed: Boolean = false) = PanelPack(
