@@ -77,7 +77,6 @@ internal class EmoRepoPanelDialog private constructor(
     )
     private val sheetHost = FrameLayout(hostContext)
     private val packTabs = RecyclerView(hostContext)
-    private val collapsedChooser = RecyclerView(hostContext)
     private val pager = ViewPager2(hostContext)
     private val globalStatus = TextView(hostContext)
     private val globalProgress = ProgressBar(hostContext)
@@ -93,7 +92,6 @@ internal class EmoRepoPanelDialog private constructor(
     private var packs: List<PanelPack> = emptyList()
     private var panelColumns = DEFAULT_PANEL_COLUMNS
     private var tabAdapter: PackTabAdapter? = null
-    private var collapsedChooserAdapter: CollapsedPackAdapter? = null
     private var pageAdapter: PackPageAdapter? = null
     private var pageCallbackRegistered = false
     private var drawerState = DrawerState.COLLAPSED
@@ -112,7 +110,6 @@ internal class EmoRepoPanelDialog private constructor(
                 pageCallbackRegistered = false
             }
             tabAdapter?.dispose()
-            collapsedChooserAdapter?.dispose()
             pageAdapter?.dispose()
             synchronized(companionLock) {
                 if (current === this) current = null
@@ -156,12 +153,6 @@ internal class EmoRepoPanelDialog private constructor(
         packTabs.overScrollMode = View.OVER_SCROLL_NEVER
         packTabs.setBackgroundColor(surfaceColor)
         packTabs.elevation = dp(4).toFloat()
-        collapsedChooser.layoutManager = LinearLayoutManager(hostContext, RecyclerView.HORIZONTAL, false)
-        collapsedChooser.itemAnimator = null
-        collapsedChooser.overScrollMode = View.OVER_SCROLL_NEVER
-        collapsedChooser.setBackgroundColor(surfaceColor)
-        collapsedChooser.elevation = dp(8).toFloat()
-        collapsedChooser.visibility = View.GONE
 
         val content = FrameLayout(hostContext)
         pager.offscreenPageLimit = 1
@@ -204,14 +195,6 @@ internal class EmoRepoPanelDialog private constructor(
                 dp(PACK_TAB_HEIGHT_DP),
                 Gravity.BOTTOM,
             ),
-        )
-        sheetHost.addView(
-            collapsedChooser,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(PACK_TAB_HEIGHT_DP),
-                Gravity.BOTTOM,
-            ).apply { bottomMargin = dp(PACK_TAB_HEIGHT_DP) },
         )
         buildTouchPreview()
         sheetHost.addView(
@@ -294,9 +277,11 @@ internal class EmoRepoPanelDialog private constructor(
     private fun applyPanelSnapshot(snapshot: PanelSnapshot) {
         panelColumns = snapshot.configuration.columns
         revision = snapshot.revision
-        packs = snapshot.packs.filter { pack ->
-            pack.id == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID || pack.itemCount > 0
-        }
+        packs = orderPanelPacksForBrowsing(
+            snapshot.packs.filter { pack ->
+                pack.id == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID || pack.itemCount > 0
+            },
+        )
         if (packs.isEmpty()) {
             showGlobalError("EmoRepo 暂时没有表情包", ::loadPacks)
         } else {
@@ -307,13 +292,8 @@ internal class EmoRepoPanelDialog private constructor(
 
     private fun bindPacks() {
         tabAdapter?.dispose()
-        collapsedChooserAdapter?.dispose()
         pageAdapter?.dispose()
-        hideCollapsedChooser()
         tabAdapter = PackTabAdapter(packs).also { packTabs.adapter = it }
-        collapsedChooserAdapter = CollapsedPackAdapter(packs.filter { it.collapsed }).also {
-            collapsedChooser.adapter = it
-        }
         pageAdapter = PackPageAdapter(packs).also { pager.adapter = it }
         if (!pageCallbackRegistered) {
             pager.registerOnPageChangeCallback(pageChangeCallback)
@@ -329,7 +309,6 @@ internal class EmoRepoPanelDialog private constructor(
             lastSelectedPackId = pack.id
             tabAdapter?.select(position)
             tabAdapter?.tabPositionForPack(position)?.let(packTabs::smoothScrollToPosition)
-            hideCollapsedChooser()
             updatePreviewPreload(pack.id)
         }
     }
@@ -340,21 +319,15 @@ internal class EmoRepoPanelDialog private constructor(
         lastSelectedPackId = packs[position].id
         tabAdapter?.select(position)
         tabAdapter?.tabPositionForPack(position)?.let(packTabs::smoothScrollToPosition)
-        hideCollapsedChooser()
         mainHandler.post { updatePreviewPreload(packs.getOrNull(position)?.id) }
     }
 
-    private fun toggleCollapsedChooser() {
-        if (collapsedChooser.visibility == View.VISIBLE) {
-            collapsedChooser.visibility = View.GONE
-        } else {
-            collapsedChooserAdapter?.notifyDataSetChanged()
-            collapsedChooser.visibility = View.VISIBLE
-        }
-    }
-
-    private fun hideCollapsedChooser() {
-        collapsedChooser.visibility = View.GONE
+    private fun selectNextPackFromGridEnd() {
+        val next = nextPanelPackIndex(pager.currentItem, packs.size)
+        if (next == pager.currentItem) return
+        selectPack(next, smoothScroll = true)
+        val nextPackId = packs.getOrNull(next)?.id ?: return
+        mainHandler.post { visiblePages[nextPackId]?.scrollToTop() }
     }
 
     private fun updatePreviewPreload(selectedPackId: String?) {
@@ -528,7 +501,6 @@ internal class EmoRepoPanelDialog private constructor(
     }
 
     private fun showGlobalStatus(message: String, loading: Boolean) {
-        hideCollapsedChooser()
         globalStatus.setOnClickListener(null)
         globalStatus.text = message
         globalStatus.visibility = View.VISIBLE
@@ -591,14 +563,8 @@ internal class EmoRepoPanelDialog private constructor(
     private inner class PackTabAdapter(
         private val items: List<PanelPack>,
     ) : RecyclerView.Adapter<PackTabHolder>() {
-        private val normalEntries = items.mapIndexedNotNull { index, pack ->
-            (index to pack).takeIf { !pack.collapsed }
-        }
-        private val collapsedEntries = items.mapIndexedNotNull { index, pack ->
-            (index to pack).takeIf { pack.collapsed }
-        }
-        private val collapsedTabPosition = normalEntries.size.takeIf { collapsedEntries.isNotEmpty() }
-        private val settingsPosition = normalEntries.size + if (collapsedEntries.isEmpty()) 0 else 1
+        private val collapsedCount = items.count(PanelPack::collapsed)
+        private var collapsedExpanded = false
         private var selectedPackPosition = RecyclerView.NO_POSITION
         private val holders = mutableSetOf<PackTabHolder>()
 
@@ -606,26 +572,27 @@ internal class EmoRepoPanelDialog private constructor(
             PackTabHolder(createPackTab()).also(holders::add)
 
         override fun onBindViewHolder(holder: PackTabHolder, position: Int) {
-            val normal = normalEntries.getOrNull(position)
-            when {
-                normal != null -> {
-                    val (packPosition, pack) = normal
+            when (val entry = entries()[position]) {
+                is PanelTabEntry.Pack -> {
+                    val packPosition = entry.packPosition
+                    val pack = items[packPosition]
                     holder.bind(pack, packPosition == selectedPackPosition) {
                         selectPack(packPosition, smoothScroll = true)
                     }
                 }
-                position == collapsedTabPosition -> {
+                PanelTabEntry.Collapsed -> {
                     holder.bindCollapsed(
-                        count = collapsedEntries.size,
-                        selected = collapsedEntries.any { it.first == selectedPackPosition },
-                        onClick = ::toggleCollapsedChooser,
+                        count = collapsedCount,
+                        expanded = collapsedExpanded,
+                        selected = !collapsedExpanded && items.getOrNull(selectedPackPosition)?.collapsed == true,
+                        onClick = ::toggleCollapsedEntries,
                     )
                 }
-                position == settingsPosition -> holder.bindSettings(::openEmoRepoSettings)
+                PanelTabEntry.Settings -> holder.bindSettings(::openEmoRepoSettings)
             }
         }
 
-        override fun getItemCount(): Int = settingsPosition + 1
+        override fun getItemCount(): Int = entries().size
 
         override fun onViewRecycled(holder: PackTabHolder) {
             holder.dispose()
@@ -641,37 +608,21 @@ internal class EmoRepoPanelDialog private constructor(
 
         fun tabPositionForPack(position: Int): Int? {
             if (position == RecyclerView.NO_POSITION) return null
-            normalEntries.indexOfFirst { it.first == position }.takeIf { it >= 0 }?.let { return it }
-            return collapsedTabPosition.takeIf { collapsedEntries.any { it.first == position } }
+            val entries = entries()
+            entries.indexOf(PanelTabEntry.Pack(position)).takeIf { it >= 0 }?.let { return it }
+            return entries.indexOf(PanelTabEntry.Collapsed)
+                .takeIf { it >= 0 && items.getOrNull(position)?.collapsed == true }
         }
 
-        fun dispose() {
-            holders.forEach(PackTabHolder::dispose)
-            holders.clear()
-        }
-    }
-
-    private inner class CollapsedPackAdapter(
-        private val items: List<PanelPack>,
-    ) : RecyclerView.Adapter<PackTabHolder>() {
-        private val holders = mutableSetOf<PackTabHolder>()
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PackTabHolder =
-            PackTabHolder(createPackTab()).also(holders::add)
-
-        override fun onBindViewHolder(holder: PackTabHolder, position: Int) {
-            val pack = items[position]
-            holder.bind(pack, pack.id == lastSelectedPackId) {
-                val packPosition = packs.indexOfFirst { it.id == pack.id }
-                if (packPosition >= 0) selectPack(packPosition, smoothScroll = true)
-            }
+        private fun toggleCollapsedEntries() {
+            collapsedExpanded = !collapsedExpanded
+            notifyDataSetChanged()
+            val foldPosition = entries().indexOf(PanelTabEntry.Collapsed).takeIf { it >= 0 } ?: return
+            val target = if (collapsedExpanded) foldPosition + 1 else foldPosition
+            mainHandler.post { packTabs.smoothScrollToPosition(target.coerceAtMost(itemCount - 1)) }
         }
 
-        override fun getItemCount(): Int = items.size
-
-        override fun onViewRecycled(holder: PackTabHolder) {
-            holder.dispose()
-        }
+        private fun entries(): List<PanelTabEntry> = panelTabEntries(items, collapsedExpanded)
 
         fun dispose() {
             holders.forEach(PackTabHolder::dispose)
@@ -711,12 +662,12 @@ internal class EmoRepoPanelDialog private constructor(
             container.setOnClickListener { onClick() }
         }
 
-        fun bindCollapsed(count: Int, selected: Boolean, onClick: () -> Unit) {
+        fun bindCollapsed(count: Int, expanded: Boolean, selected: Boolean, onClick: () -> Unit) {
             disposable?.dispose()
             disposable = null
             cover.setImageResource(android.R.drawable.ic_menu_more)
-            cover.contentDescription = "展开折叠表情包"
-            name.text = "折叠 $count"
+            cover.contentDescription = if (expanded) "收起折叠表情包" else "展开折叠表情包"
+            name.text = if (expanded) "收起 $count" else "折叠 $count"
             container.background = roundedBackground(
                 if (selected) selectedColor else Color.TRANSPARENT,
                 dp(12).toFloat(),
@@ -820,6 +771,7 @@ internal class EmoRepoPanelDialog private constructor(
         private var touchPreviewActive = false
         private var touchPreviewPosition = GridView.INVALID_POSITION
         private var previewEndedAt = 0L
+        private val endPullDetector = EndOfPackPullDetector(dp(NEXT_PACK_PULL_DP).toFloat())
 
         init {
             grid.numColumns = panelColumns
@@ -836,7 +788,28 @@ internal class EmoRepoPanelDialog private constructor(
                 itemAdapter?.getItem(position)?.let(::send)
             }
             grid.setOnTouchListener { _, event ->
-                if (!touchPreviewActive) return@setOnTouchListener false
+                if (!touchPreviewActive) {
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> endPullDetector.onDown(
+                            atEnd = !grid.canScrollVertically(1),
+                            x = event.x,
+                            y = event.y,
+                        )
+                        MotionEvent.ACTION_MOVE -> {
+                            if (
+                                endPullDetector.onMove(
+                                    atEnd = !grid.canScrollVertically(1),
+                                    x = event.x,
+                                    y = event.y,
+                                )
+                            ) {
+                                selectNextPackFromGridEnd()
+                            }
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> endPullDetector.reset()
+                    }
+                    return@setOnTouchListener false
+                }
                 when (event.actionMasked) {
                     MotionEvent.ACTION_MOVE -> {
                         val position = grid.pointToPosition(event.x.toInt(), event.y.toInt())
@@ -858,6 +831,7 @@ internal class EmoRepoPanelDialog private constructor(
             grid.setOnItemLongClickListener { _, _, position, _ ->
                 if (boundPack == null) return@setOnItemLongClickListener true
                 val item = itemAdapter?.getItem(position) ?: return@setOnItemLongClickListener true
+                endPullDetector.reset()
                 touchPreviewActive = true
                 touchPreviewPosition = position
                 touchPreviewOwner = this
@@ -951,6 +925,10 @@ internal class EmoRepoPanelDialog private constructor(
             if (active) startPreviewPreload() else stopPreviewPreload()
         }
 
+        fun scrollToTop() {
+            grid.setSelection(0)
+        }
+
         fun startPreviewPreload() {
             stopPreviewPreload()
             if (boundPack == null) return
@@ -990,6 +968,7 @@ internal class EmoRepoPanelDialog private constructor(
 
         fun dispose() {
             generation += 1
+            endPullDetector.reset()
             stopPreviewPreload()
             finishTouchPreview("页面释放")
             boundPack?.let { visiblePages.remove(it.id, this) }
@@ -1514,6 +1493,7 @@ internal class EmoRepoPanelDialog private constructor(
         private const val IMAGE_MEMORY_CACHE_BYTES = 128L * 1024L * 1024L
         private const val PREVIEW_SIZE_PX = 1024
         private const val PREVIEW_CLICK_SUPPRESSION_MS = 350L
+        private const val NEXT_PACK_PULL_DP = 72
         private const val PRELOAD_VISIBLE_ROWS = 8
         private const val DRAWER_CLOSE_RATIO = 0.22f
         private const val DRAWER_CLOSE_VELOCITY = 1_200f

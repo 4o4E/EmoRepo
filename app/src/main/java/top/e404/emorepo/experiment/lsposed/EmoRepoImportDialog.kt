@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
 import android.widget.ImageView
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -25,6 +26,7 @@ import coil3.request.CachePolicy
 import coil3.request.Disposable
 import coil3.request.ImageRequest
 import coil3.target.ImageViewTarget
+import java.io.File
 import top.e404.emorepo.ipc.EmoRepoIpcContract
 
 /** QQ 图片消息导入使用的自定义表情包选择与确认窗口。 */
@@ -46,6 +48,10 @@ internal class EmoRepoImportDialog private constructor(
     private val content = LinearLayout(context)
     private var chooserAdapter: PackAdapter? = null
     private var confirmationCover: Disposable? = null
+    private var previewRequest: Disposable? = null
+    private var previewFile: File? = null
+    private var previewImage: ImageView? = null
+    private var chooserVisible = false
 
     fun show() {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -68,6 +74,7 @@ internal class EmoRepoImportDialog private constructor(
 
     private fun showChooser() {
         disposeContent()
+        chooserVisible = true
         content.removeAllViews()
         content.addView(title("添加到 EmoRepo"))
         content.addView(
@@ -77,19 +84,27 @@ internal class EmoRepoImportDialog private constructor(
                 bottomMargin = dp(12)
             },
         )
+        content.addView(
+            createImportPreview(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                importPreviewHeight(),
+            ).apply { bottomMargin = dp(12) },
+        )
         val list = RecyclerView(context).apply {
             layoutManager = LinearLayoutManager(context)
             itemAnimator = null
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             adapter = PackAdapter(packs, ::showConfirmation).also { chooserAdapter = it }
         }
-        val maximumHeight = (context.resources.displayMetrics.heightPixels * 0.58f).toInt()
+        val maximumHeight = (context.resources.displayMetrics.heightPixels * 0.40f).toInt()
         val desiredHeight = dp(PACK_ROW_HEIGHT_DP + PACK_ROW_SPACING_DP) * packs.size
+        val minimumHeight = minOf(dp(PACK_ROW_HEIGHT_DP), maximumHeight).coerceAtLeast(1)
         content.addView(
             list,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                desiredHeight.coerceIn(dp(PACK_ROW_HEIGHT_DP), maximumHeight),
+                desiredHeight.coerceIn(minimumHeight, maximumHeight.coerceAtLeast(minimumHeight)),
             ),
         )
         content.addView(
@@ -158,6 +173,48 @@ internal class EmoRepoImportDialog private constructor(
         dialog.window?.setLayout(dialogWidth(), ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
+    fun updatePreview(file: File) {
+        if (!file.isFile || file.length() <= 0L || !dialog.isShowing) return
+        previewFile = file
+        if (chooserVisible) bindImportPreview()
+    }
+
+    private fun createImportPreview(): View = FrameLayout(context).apply {
+        background = roundedBackground(rowColor, dp(14).toFloat())
+        addView(
+            ImageView(context).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                setImageResource(android.R.drawable.ic_menu_gallery)
+                contentDescription = "待导入表情预览"
+                previewImage = this
+            },
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ),
+        )
+        bindImportPreview()
+    }
+
+    private fun bindImportPreview() {
+        previewRequest?.dispose()
+        previewRequest = null
+        val image = previewImage ?: return
+        image.setImageResource(android.R.drawable.ic_menu_gallery)
+        val file = previewFile ?: return
+        val target = AnimatingTarget(image)
+        val request = ImageRequest.Builder(context)
+            .data(file)
+            .size(dialogWidth() - dp(36), importPreviewHeight())
+            .memoryCacheKey("qq-import-preview:${file.length()}:${file.lastModified()}")
+            .diskCachePolicy(CachePolicy.DISABLED)
+            .target(target)
+            .build()
+        previewRequest = CoverDisposable(imageLoader.enqueue(request), target)
+    }
+
     private fun loadCover(target: ImageView, pack: PanelPack, sizeDp: Int): Disposable? {
         val itemId = pack.coverItemId ?: return null
         val coverPackId = pack.coverPackId ?: return null
@@ -174,10 +231,14 @@ internal class EmoRepoImportDialog private constructor(
     }
 
     private fun disposeContent() {
+        chooserVisible = false
         chooserAdapter?.dispose()
         chooserAdapter = null
         confirmationCover?.dispose()
         confirmationCover = null
+        previewRequest?.dispose()
+        previewRequest = null
+        previewImage = null
     }
 
     private fun title(value: String) = TextView(context).apply {
@@ -319,6 +380,10 @@ internal class EmoRepoImportDialog private constructor(
     private fun dialogWidth(): Int =
         minOf(context.resources.displayMetrics.widthPixels - dp(32), dp(MAXIMUM_WIDTH_DP))
 
+    private fun importPreviewHeight(): Int =
+        minOf(dp(IMPORT_PREVIEW_HEIGHT_DP), (context.resources.displayMetrics.heightPixels * 0.22f).toInt())
+            .coerceAtLeast(1)
+
     private fun roundedBackground(color: Int, radius: Float) = GradientDrawable().apply {
         setColor(color)
         cornerRadius = radius
@@ -329,6 +394,7 @@ internal class EmoRepoImportDialog private constructor(
         private const val PACK_ROW_SPACING_DP = 6
         private const val PACK_COVER_SIZE_DP = 50
         private const val CONFIRM_COVER_SIZE_DP = 72
+        private const val IMPORT_PREVIEW_HEIGHT_DP = 150
         private const val ACTION_HEIGHT_DP = 44
         private const val MAXIMUM_WIDTH_DP = 440
         private var sharedImageLoader: ImageLoader? = null
@@ -338,9 +404,9 @@ internal class EmoRepoImportDialog private constructor(
             packs: List<PanelPack>,
             pictureCount: Int,
             onImport: (String) -> Unit,
-        ) {
+        ): EmoRepoImportDialog {
             require(packs.isNotEmpty()) { "EmoRepo 没有可导入的表情包" }
-            EmoRepoImportDialog(context, packs, pictureCount, onImport).show()
+            return EmoRepoImportDialog(context, packs, pictureCount, onImport).also { it.show() }
         }
 
         private fun importImageLoader(context: Context): ImageLoader = synchronized(this) {

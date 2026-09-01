@@ -345,8 +345,14 @@ internal object EmoRepoMessageMenuHook {
     }
 
     private fun showPackChooser(context: Context, packs: List<PanelPack>, pictures: List<PictureRef>) {
-        EmoRepoImportDialog.show(context, packs, pictures.size) { packId ->
+        val chooser = EmoRepoImportDialog.show(context, packs, pictures.size) { packId ->
             importPictures(context, packId, pictures)
+        }
+        val first = pictures.firstOrNull() ?: return
+        worker.execute {
+            runCatching { resolvePictureFile(context, first) }
+                .onSuccess { file -> mainHandler.post { chooser.updatePreview(file) } }
+                .onFailure { error -> log("加载待导入首图预览失败", error) }
         }
     }
 
