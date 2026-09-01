@@ -6,6 +6,8 @@ import top.e404.emorepo.BuildConfig
 object EmoRepoIpcContract {
     const val VIRTUAL_RECENT_PACK_ID = "recent"
     const val VIRTUAL_RECENT_PACK_NAME = "最近使用"
+    const val VIRTUAL_RECENTLY_ADDED_PACK_ID = "recently_added"
+    const val VIRTUAL_RECENTLY_ADDED_PACK_NAME = "最近添加"
     val AUTHORITY: String = "${BuildConfig.APPLICATION_ID}.provider"
     val BASE_URI: Uri = Uri.Builder().scheme("content").authority(AUTHORITY).build()
     const val PATH_REVISION = "revision"

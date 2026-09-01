@@ -8,6 +8,7 @@ class PanelNavigationTest {
     fun `collapsed packs move behind normal packs while preserving group order`() {
         val packs = listOf(
             pack("recent"),
+            pack("recently_added"),
             pack("a", collapsed = true),
             pack("b"),
             pack("c", collapsed = true),
@@ -15,7 +16,7 @@ class PanelNavigationTest {
         )
 
         assertEquals(
-            listOf("recent", "b", "d", "a", "c"),
+            listOf("recent", "recently_added", "b", "d", "a", "c"),
             orderPanelPacksForBrowsing(packs).map(PanelPack::id),
         )
     }
@@ -47,12 +48,29 @@ class PanelNavigationTest {
     }
 
     @Test
-    fun `horizontal outward swipe loops only at pager edges`() {
-        assertEquals(3, panelHorizontalLoopTarget(0, 4, 100f, 5f, 72f))
-        assertEquals(0, panelHorizontalLoopTarget(3, 4, -100f, 5f, 72f))
-        assertEquals(null, panelHorizontalLoopTarget(1, 4, 100f, 5f, 72f))
-        assertEquals(null, panelHorizontalLoopTarget(0, 4, 60f, 5f, 72f))
-        assertEquals(null, panelHorizontalLoopTarget(0, 4, 100f, 120f, 72f))
+    fun `content positions append collapsed packs only after expansion`() {
+        val packs = listOf(pack("recent"), pack("normal"), pack("folded-a", true), pack("folded-b", true))
+
+        assertEquals(listOf(0, 1), visiblePanelPackPositions(packs, collapsedExpanded = false))
+        assertEquals(listOf(0, 1, 2, 3), visiblePanelPackPositions(packs, collapsedExpanded = true))
+    }
+
+    @Test
+    fun `pack tab repositions only when selected entry is not fully visible`() {
+        assertEquals(false, shouldRepositionPackTab(3, 1, 5))
+        assertEquals(true, shouldRepositionPackTab(6, 1, 5))
+        assertEquals(true, shouldRepositionPackTab(0, 1, 5))
+        assertEquals(true, shouldRepositionPackTab(0, -1, -1))
+    }
+
+    @Test
+    fun `collapsed packs auto expand only when user scroll reaches normal content end`() {
+        assertEquals(true, shouldAutoExpandCollapsed(false, true, true, 10, 99, 99))
+        assertEquals(false, shouldAutoExpandCollapsed(true, true, true, 10, 99, 99))
+        assertEquals(false, shouldAutoExpandCollapsed(false, false, true, 10, 99, 99))
+        assertEquals(false, shouldAutoExpandCollapsed(false, true, false, 10, 99, 99))
+        assertEquals(false, shouldAutoExpandCollapsed(false, true, true, -10, 99, 99))
+        assertEquals(false, shouldAutoExpandCollapsed(false, true, true, 10, 98, 99))
     }
 
     private fun pack(id: String, collapsed: Boolean = false) = PanelPack(

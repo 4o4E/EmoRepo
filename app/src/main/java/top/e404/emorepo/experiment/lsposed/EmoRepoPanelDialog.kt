@@ -17,7 +17,6 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.Parcelable
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
@@ -27,19 +26,16 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
-import android.widget.BaseAdapter
 import android.widget.FrameLayout
-import android.widget.GridView
 import android.widget.ImageView
-import android.widget.AbsListView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.setPadding
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.viewpager2.widget.ViewPager2
 import coil3.Image
 import coil3.ImageLoader
 import coil3.gif.AnimatedImageDecoder
@@ -83,7 +79,7 @@ internal class EmoRepoPanelDialog private constructor(
     )
     private val sheetHost = FrameLayout(hostContext)
     private val packTabs = RecyclerView(hostContext)
-    private val pager = ViewPager2(hostContext)
+    private val contentList = RecyclerView(hostContext)
     private val globalStatus = TextView(hostContext)
     private val globalProgress = ProgressBar(hostContext)
     private val previewOverlay = FrameLayout(hostContext)
@@ -93,34 +89,32 @@ internal class EmoRepoPanelDialog private constructor(
     private val destroyed = AtomicBoolean(false)
     private val sending = AtomicBoolean(false)
     private val imageLoader = panelImageLoader(hostContext)
-    private val visiblePages = mutableMapOf<String, PackPage>()
-    private val packScrollStates = mutableMapOf<String, Parcelable>()
     private var revision = 0L
     private var packs: List<PanelPack> = emptyList()
     private var panelColumns = DEFAULT_PANEL_COLUMNS
     private var tabAdapter: PackTabAdapter? = null
-    private var pageAdapter: PackPageAdapter? = null
-    private var pageCallbackRegistered = false
+    private var contentAdapter: PanelContentAdapter? = null
+    private var contentLayoutManager: GridLayoutManager? = null
+    private var collapsedExpanded = false
+    private var activePackPosition = RecyclerView.NO_POSITION
     private var drawerState = DrawerState.COLLAPSED
     private var previewGeneration = 0
     private var previewDisposable: Disposable? = null
-    private var touchPreviewOwner: PackPage? = null
-    private var pagerTouchDownX = 0f
-    private var pagerTouchDownY = 0f
-    private var pagerTouchStartPosition = 0
+    private var touchPreviewActive = false
+    private var touchPreviewPosition = RecyclerView.NO_POSITION
+    private var previewEndedAt = 0L
+    private val previewPreloadTasks = mutableListOf<Future<*>>()
+    private var autoExpandPending = false
 
     fun show() {
         buildContent()
         dialog.setCanceledOnTouchOutside(true)
         dialog.setOnDismissListener {
             destroyed.set(true)
-            hideTouchPreview()
-            if (pageCallbackRegistered) {
-                pager.unregisterOnPageChangeCallback(pageChangeCallback)
-                pageCallbackRegistered = false
-            }
+            finishTouchPreview("面板关闭")
+            stopPreviewPreload()
             tabAdapter?.dispose()
-            pageAdapter?.dispose()
+            contentAdapter?.dispose()
             synchronized(companionLock) {
                 if (current === this) current = null
             }
@@ -165,17 +159,20 @@ internal class EmoRepoPanelDialog private constructor(
         packTabs.elevation = dp(4).toFloat()
 
         val content = FrameLayout(hostContext)
-        pager.offscreenPageLimit = 1
-        (pager.getChildAt(0) as? RecyclerView)?.addOnItemTouchListener(
-            object : RecyclerView.SimpleOnItemTouchListener() {
-                override fun onInterceptTouchEvent(recyclerView: RecyclerView, event: MotionEvent): Boolean {
-                    trackPagerLoopGesture(event)
-                    return false
+        contentList.itemAnimator = null
+        contentList.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        contentList.setPadding(0, dp(2), 0, dp(PACK_TAB_HEIGHT_DP + 2))
+        contentList.clipToPadding = false
+        contentList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (dy != 0) {
+                    syncActivePackFromScroll()
+                    maybeAutoExpandCollapsed(dy)
                 }
-            },
-        )
+            }
+        })
         content.addView(
-            pager,
+            contentList,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -303,71 +300,104 @@ internal class EmoRepoPanelDialog private constructor(
         if (packs.isEmpty()) {
             showGlobalError("EmoRepo 暂时没有表情包", ::loadPacks)
         } else {
-            showPager()
+            showContent()
             bindPacks()
         }
     }
 
     private fun bindPacks() {
         tabAdapter?.dispose()
-        pageAdapter?.dispose()
+        contentAdapter?.dispose()
+        collapsedExpanded = false
         tabAdapter = PackTabAdapter(packs).also { packTabs.adapter = it }
-        pageAdapter = PackPageAdapter(packs).also { pager.adapter = it }
-        if (!pageCallbackRegistered) {
-            pager.registerOnPageChangeCallback(pageChangeCallback)
-            pageCallbackRegistered = true
+        val adapter = PanelContentAdapter(packs).also { contentAdapter = it }
+        val layoutManager = GridLayoutManager(hostContext, panelColumns).apply {
+            spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+                override fun getSpanSize(position: Int): Int =
+                    if (adapter.isHeader(position)) panelColumns else 1
+            }
         }
-        val initial = packs.indexOfFirst { it.id == lastSelectedPackId }.takeIf { it >= 0 } ?: 0
-        selectPack(initial, smoothScroll = false)
+        contentLayoutManager = layoutManager
+        contentList.layoutManager = layoutManager
+        contentList.adapter = adapter
+        adapter.loadVisibleSections()
+        val initial = visiblePanelPackPositions(packs, collapsedExpanded).firstOrNull() ?: 0
+        selectPack(initial)
+        contentList.post { adapter.refreshTrailingSpace() }
     }
 
-    private val pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
-        override fun onPageSelected(position: Int) {
-            val pack = packs.getOrNull(position) ?: return
-            lastSelectedPackId = pack.id
-            tabAdapter?.select(position)
-            tabAdapter?.tabPositionForPack(position)?.let(packTabs::smoothScrollToPosition)
-            updatePreviewPreload(pack.id)
-        }
-    }
-
-    private fun selectPack(position: Int, smoothScroll: Boolean) {
+    private fun selectPack(position: Int) {
         if (position !in packs.indices) return
-        pager.setCurrentItem(position, smoothScroll)
-        lastSelectedPackId = packs[position].id
-        tabAdapter?.select(position)
-        tabAdapter?.tabPositionForPack(position)?.let(packTabs::smoothScrollToPosition)
-        mainHandler.post { updatePreviewPreload(packs[position].id) }
+        val adapterPosition = contentAdapter?.headerPositionForPack(position) ?: return
+        activatePack(position)
+        val layoutManager = contentLayoutManager ?: return
+        layoutManager.scrollToPositionWithOffset(adapterPosition, dp(2))
     }
 
-    private fun trackPagerLoopGesture(event: MotionEvent) {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                pagerTouchDownX = event.x
-                pagerTouchDownY = event.y
-                pagerTouchStartPosition = pager.currentItem
-            }
-            MotionEvent.ACTION_UP -> {
-                panelHorizontalLoopTarget(
-                    startPosition = pagerTouchStartPosition,
-                    packCount = packs.size,
-                    distanceX = event.x - pagerTouchDownX,
-                    distanceY = event.y - pagerTouchDownY,
-                    thresholdPixels = dp(PAGER_LOOP_SWIPE_DP).toFloat(),
-                )?.let { target -> selectPack(target, smoothScroll = false) }
+    private fun activatePack(position: Int) {
+        if (position !in packs.indices) return
+        if (activePackPosition != position) {
+            activePackPosition = position
+            startPreviewPreload(contentAdapter?.itemsForPack(position).orEmpty(), packs[position].displayName)
+        }
+        tabAdapter?.select(position)
+        ensurePackTabVisible(position)
+    }
+
+    private fun ensurePackTabVisible(packPosition: Int) {
+        val tabPosition = tabAdapter?.tabPositionForPack(packPosition) ?: return
+        packTabs.post {
+            if (destroyed.get()) return@post
+            val layoutManager = packTabs.layoutManager as? LinearLayoutManager ?: return@post
+            val first = layoutManager.findFirstCompletelyVisibleItemPosition()
+            val last = layoutManager.findLastCompletelyVisibleItemPosition()
+            if (!shouldRepositionPackTab(tabPosition, first, last)) return@post
+            val centeredOffset = ((packTabs.width - dp(PACK_TAB_WIDTH_DP)) / 2).coerceAtLeast(0)
+            layoutManager.scrollToPositionWithOffset(tabPosition, centeredOffset)
+        }
+    }
+
+    private fun syncActivePackFromScroll() {
+        val first = contentLayoutManager?.findFirstVisibleItemPosition()
+            ?.takeIf { it != RecyclerView.NO_POSITION } ?: return
+        contentAdapter?.packPositionAt(first)?.let(::activatePack)
+    }
+
+    private fun maybeAutoExpandCollapsed(verticalDelta: Int) {
+        val layoutManager = contentLayoutManager ?: return
+        val adapter = contentAdapter ?: return
+        if (!autoExpandPending &&
+            shouldAutoExpandCollapsed(
+                collapsedExpanded = collapsedExpanded,
+                hasCollapsedPacks = packs.any(PanelPack::collapsed),
+                userScrollActive = contentList.scrollState != RecyclerView.SCROLL_STATE_IDLE,
+                verticalDelta = verticalDelta,
+                lastVisiblePosition = layoutManager.findLastVisibleItemPosition(),
+                lastContentPosition = adapter.lastContentPosition(),
+            )
+        ) {
+            autoExpandPending = true
+            contentList.post {
+                autoExpandPending = false
+                if (destroyed.get() || collapsedExpanded) return@post
+                QqPanelIntegration.log("纵向滚动到普通分组末尾，自动展开折叠表情包")
+                updateCollapsedExpanded(expanded = true, revealTab = false)
             }
         }
     }
 
-    private fun updatePreviewPreload(selectedPackId: String?) {
-        visiblePages.forEach { (packId, page) -> page.setPageActive(packId == selectedPackId) }
+    private fun updateCollapsedExpanded(expanded: Boolean, revealTab: Boolean) {
+        if (collapsedExpanded == expanded) return
+        collapsedExpanded = expanded
+        tabAdapter?.refreshCollapsedEntries(revealTab)
+        contentAdapter?.setCollapsedExpanded(expanded)
+        if (!expanded && packs.getOrNull(activePackPosition)?.collapsed == true) stopPreviewPreload()
     }
 
     private fun canDragDrawer(touchY: Float): Boolean {
         // 顶部把手、标题和表情包栏始终可以拖动抽屉，不受网格滚动位置影响。
-        if (pager.top > 0 && touchY < pager.top) return true
-        val packId = packs.getOrNull(pager.currentItem)?.id ?: return true
-        return visiblePages[packId]?.canScrollUp() != true
+        if (contentList.top > 0 && touchY < contentList.top) return true
+        return !contentList.canScrollVertically(-1)
     }
 
     private fun canExpandDrawer(): Boolean = drawerState == DrawerState.COLLAPSED
@@ -522,8 +552,8 @@ internal class EmoRepoPanelDialog private constructor(
     }
 
     private fun dispatchTouchPreviewMotion(event: MotionEvent): Boolean {
-        val owner = touchPreviewOwner ?: return false
-        owner.handlePreviewMotion(event)
+        if (!touchPreviewActive) return false
+        handleTouchPreviewMotion(event)
         return true
     }
 
@@ -532,7 +562,7 @@ internal class EmoRepoPanelDialog private constructor(
         globalStatus.text = message
         globalStatus.visibility = View.VISIBLE
         globalProgress.visibility = if (loading) View.VISIBLE else View.GONE
-        pager.visibility = View.GONE
+        contentList.visibility = View.GONE
         packTabs.visibility = View.GONE
     }
 
@@ -541,10 +571,10 @@ internal class EmoRepoPanelDialog private constructor(
         globalStatus.setOnClickListener { retry() }
     }
 
-    private fun showPager() {
+    private fun showContent() {
         globalStatus.visibility = View.GONE
         globalProgress.visibility = View.GONE
-        pager.visibility = View.VISIBLE
+        contentList.visibility = View.VISIBLE
         packTabs.visibility = View.VISIBLE
     }
 
@@ -590,7 +620,6 @@ internal class EmoRepoPanelDialog private constructor(
     private inner class PackTabAdapter(
         private val items: List<PanelPack>,
     ) : RecyclerView.Adapter<PackTabHolder>() {
-        private var collapsedExpanded = false
         private var selectedPackPosition = RecyclerView.NO_POSITION
         private val holders = mutableSetOf<PackTabHolder>()
 
@@ -603,7 +632,7 @@ internal class EmoRepoPanelDialog private constructor(
                     val packPosition = entry.packPosition
                     val pack = items[packPosition]
                     holder.bind(pack, packPosition == selectedPackPosition) {
-                        selectPack(packPosition, smoothScroll = true)
+                        selectPack(packPosition)
                     }
                 }
                 PanelTabEntry.Collapsed -> {
@@ -640,8 +669,12 @@ internal class EmoRepoPanelDialog private constructor(
         }
 
         private fun toggleCollapsedEntries() {
-            collapsedExpanded = !collapsedExpanded
+            updateCollapsedExpanded(!collapsedExpanded, revealTab = true)
+        }
+
+        fun refreshCollapsedEntries(revealTab: Boolean) {
             notifyDataSetChanged()
+            if (!revealTab) return
             val foldPosition = entries().indexOf(PanelTabEntry.Collapsed).takeIf { it >= 0 } ?: return
             val target = if (collapsedExpanded) foldPosition + 1 else foldPosition
             mainHandler.post { packTabs.smoothScrollToPosition(target.coerceAtMost(itemCount - 1)) }
@@ -750,354 +783,229 @@ internal class EmoRepoPanelDialog private constructor(
         }
     }
 
-    private inner class PackPageAdapter(
-        private val items: List<PanelPack>,
-    ) : RecyclerView.Adapter<PackPageHolder>() {
-        private val holders = mutableSetOf<PackPageHolder>()
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PackPageHolder =
-            PackPageHolder(
-                PackPage(hostContext).apply {
-                    layoutParams = RecyclerView.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                },
-            ).also(holders::add)
-
-        override fun onBindViewHolder(holder: PackPageHolder, position: Int) {
-            holder.page.bind(items[position])
-        }
-
-        override fun getItemCount(): Int = items.size
-
-        override fun onViewRecycled(holder: PackPageHolder) {
-            holder.page.dispose()
-        }
-
-        fun dispose() {
-            holders.forEach { it.page.dispose() }
-            holders.clear()
-        }
-    }
-
-    private inner class PackPageHolder(val page: PackPage) : RecyclerView.ViewHolder(page)
-
-    private inner class PackPage(context: Context) : FrameLayout(context) {
-        private val grid = StatefulGridView(context)
-        private val status = TextView(context)
-        private val progress = ProgressBar(context)
-        private var generation = 0
-        private var boundPack: PanelPack? = null
-        private var itemAdapter: ItemAdapter? = null
-        private var displayedItems: List<PanelItem> = emptyList()
-        private val previewPreloadTasks = mutableListOf<Future<*>>()
-        private var pageActive = false
-        private var touchPreviewActive = false
-        private var touchPreviewPosition = GridView.INVALID_POSITION
-        private var previewEndedAt = 0L
-
-        init {
-            grid.numColumns = panelColumns
-            grid.horizontalSpacing = dp(2)
-            grid.verticalSpacing = dp(3)
-            grid.stretchMode = GridView.STRETCH_COLUMN_WIDTH
-            grid.gravity = Gravity.CENTER
-            grid.setPadding(0, dp(2), 0, dp(PACK_TAB_HEIGHT_DP + 2))
-            grid.setOnItemClickListener { _, _, position, _ ->
-                if (SystemClock.uptimeMillis() - previewEndedAt < PREVIEW_CLICK_SUPPRESSION_MS) {
-                    return@setOnItemClickListener
-                }
-                if (boundPack == null) return@setOnItemClickListener
-                itemAdapter?.getItem(position)?.let(::send)
-            }
-            grid.setOnTouchListener { _, event ->
-                if (!touchPreviewActive) return@setOnTouchListener false
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_MOVE -> {
-                        val position = grid.pointToPosition(event.x.toInt(), event.y.toInt())
-                        if (position != GridView.INVALID_POSITION && position != touchPreviewPosition) {
-                            val item = itemAdapter?.getItem(position)
-                            val anchor = itemViewAt(position)
-                            if (item != null && anchor != null) {
-                                touchPreviewPosition = position
-                                showTouchPreview(item, anchor)
-                            }
-                        }
-                    }
-
-                    MotionEvent.ACTION_UP -> finishTouchPreview("松手")
-                    MotionEvent.ACTION_CANCEL -> finishTouchPreview("手势取消")
-                }
-                true
-            }
-            grid.setOnItemLongClickListener { _, _, position, _ ->
-                if (boundPack == null) return@setOnItemLongClickListener true
-                val item = itemAdapter?.getItem(position) ?: return@setOnItemLongClickListener true
-                touchPreviewActive = true
-                touchPreviewPosition = position
-                touchPreviewOwner = this
-                pager.isUserInputEnabled = false
-                showTouchPreview(item, itemViewAt(position) ?: grid)
-                true
-            }
-            addView(grid, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            status.gravity = Gravity.CENTER
-            status.textSize = 16f
-            status.setTextColor(secondaryColor)
-            status.setPadding(dp(24))
-            addView(status, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            addView(progress, LayoutParams(dp(48), dp(48), Gravity.CENTER))
-        }
-
-        fun bind(pack: PanelPack) {
-            dispose()
-            boundPack = pack
-            visiblePages[pack.id] = this
-            pageActive = packs.getOrNull(pager.currentItem)?.id == pack.id
-            val cacheKey = panelItemCacheKey(revision, pack)
-            val cachedItems = panelItemCache[cacheKey]
-            if (cachedItems != null) {
-                showItems(pack, cachedItems)
-                if (pack.id == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID) {
-                    refreshItems(pack, cacheKey, cachedItems)
-                }
-                return
-            }
-            showStatus("正在读取 ${pack.displayName}…", loading = true)
-            refreshItems(pack, cacheKey, null)
-        }
-
-        private fun refreshItems(
-            pack: PanelPack,
-            cacheKey: PanelItemCacheKey,
-            visibleItems: List<PanelItem>?,
-        ) {
-            val requestGeneration = generation
-            metadataWorker.execute {
-                runCatching { QqPanelRepository.listItems(hostContext, pack) }
-                    .onSuccess { items ->
-                        panelItemCache[cacheKey] = items
-                        mainHandler.post {
-                            if (destroyed.get() || generation != requestGeneration || boundPack?.id != pack.id) {
-                                return@post
-                            }
-                            if (items != visibleItems) showItems(pack, items)
-                        }
-                    }.onFailure { error ->
-                        mainHandler.post {
-                            if (destroyed.get() || generation != requestGeneration || boundPack?.id != pack.id) {
-                                return@post
-                            }
-                            if (visibleItems == null) {
-                                showError(error.message ?: "${pack.displayName} 读取失败") { bind(pack) }
-                            } else {
-                                QqPanelIntegration.log("刷新当前表情包元数据失败，继续使用进程缓存", error)
-                            }
-                        }
-                    }
-            }
-        }
-
-        private fun showItems(pack: PanelPack, items: List<PanelItem>) {
-            captureScrollState()
-            stopPreviewPreload()
-            itemAdapter?.dispose()
-            itemAdapter = null
-            displayedItems = items
-            grid.adapter = null
-            if (items.isEmpty()) {
-                if (pack.id == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID) {
-                    showStatus("暂无最近使用", loading = false)
-                } else {
-                    showError("${pack.displayName} 暂时没有表情") { bind(pack) }
-                }
-            } else {
-                itemAdapter = ItemAdapter(items, pageActive).also { grid.adapter = it }
-                showGrid()
-                restoreScrollState(pack.id, items.size)
-                if (pageActive) {
-                    startPreviewPreload()
-                }
-            }
-        }
-
-        fun setPageActive(active: Boolean) {
-            if (pageActive == active) return
-            if (pageActive) captureScrollState()
-            pageActive = active
-            itemAdapter?.setFullContentEnabled(active)
-            if (active) {
-                boundPack?.let { pack -> restoreScrollState(pack.id, displayedItems.size) }
-                startPreviewPreload()
-            } else {
-                stopPreviewPreload()
-            }
-        }
-
-        fun startPreviewPreload() {
-            stopPreviewPreload()
-            if (boundPack == null) return
-            val items = displayedItems
-            if (items.isEmpty()) return
-            // 可见首屏由高优先级网格任务负责，后台先从后续区域顺序预生成，再补首屏遗漏。
-            val visibleBoundary = (panelColumns * PRELOAD_VISIBLE_ROWS).coerceAtMost(items.size)
-            val ordered = items.drop(visibleBoundary) + items.take(visibleBoundary)
-            val candidates = ordered.filter { item -> QqPanelFirstFrameCache.get(item.id) == null }
-            if (candidates.isEmpty()) return
-            val completed = AtomicInteger()
-            val failed = AtomicInteger()
-            candidates.forEach { item ->
-                previewPreloadTasks += previewPreloadWorker.submit {
-                    if (Thread.currentThread().isInterrupted || destroyed.get()) return@submit
-                    val successful = runCatching {
-                        QqPanelFirstFrameCache.preload(hostContext, item)
-                    }.onFailure { error ->
-                        QqPanelIntegration.log("预加载 QQ 面板首帧失败", error)
-                    }.getOrDefault(false)
-                    if (!successful) failed.incrementAndGet()
-                    if (completed.incrementAndGet() == candidates.size) {
-                        QqPanelIntegration.log(
-                            "当前表情包首帧预加载完成：total=${candidates.size}，failed=${failed.get()}",
-                        )
-                    }
-                }
-            }
-        }
-
-        fun stopPreviewPreload() {
-            previewPreloadTasks.forEach { task -> task.cancel(false) }
-            previewPreloadTasks.clear()
-        }
-
-        fun canScrollUp(): Boolean = grid.canScrollVertically(-1)
-
-        fun dispose() {
-            generation += 1
-            captureScrollState()
-            stopPreviewPreload()
-            finishTouchPreview("页面释放")
-            boundPack?.let { visiblePages.remove(it.id, this) }
-            boundPack = null
-            pageActive = false
-            itemAdapter?.dispose()
-            itemAdapter = null
-            grid.adapter = null
-        }
-
-        private fun captureScrollState() {
-            val packId = boundPack?.id ?: return
-            if (grid.adapter == null || grid.count <= 0) return
-            grid.captureScrollState()?.let { state -> packScrollStates[packId] = state }
-        }
-
-        private fun restoreScrollState(packId: String, itemCount: Int) {
-            val state = packScrollStates[packId] ?: return
-            if (itemCount <= 0) return
-            grid.restoreScrollState(state)
-            grid.post {
-                if (boundPack?.id == packId && grid.adapter != null) grid.restoreScrollState(state)
-            }
-        }
-
-        private fun finishTouchPreview(reason: String) {
-            if (!touchPreviewActive) return
-            QqPanelIntegration.log("关闭按压预览：$reason")
-            touchPreviewActive = false
-            touchPreviewPosition = GridView.INVALID_POSITION
-            previewEndedAt = SystemClock.uptimeMillis()
-            if (touchPreviewOwner === this) touchPreviewOwner = null
-            pager.isUserInputEnabled = true
-            grid.isPressed = false
-            grid.cancelLongPress()
-            // 关闭预览不改变表情数据，只清除当前子项按压态，避免整张网格重新绑定导致闪烁。
-            for (index in 0 until grid.childCount) {
-                grid.getChildAt(index).isPressed = false
-            }
-            hideTouchPreview()
-        }
-
-        fun handlePreviewMotion(event: MotionEvent) {
-            if (!touchPreviewActive) return
-            when (event.actionMasked) {
-                MotionEvent.ACTION_MOVE -> {
-                    val location = IntArray(2)
-                    grid.getLocationOnScreen(location)
-                    val position = grid.pointToPosition(
-                        (event.rawX - location[0]).toInt(),
-                        (event.rawY - location[1]).toInt(),
-                    )
-                    if (position != GridView.INVALID_POSITION && position != touchPreviewPosition) {
-                        val item = itemAdapter?.getItem(position)
-                        val anchor = itemViewAt(position)
-                        if (item != null && anchor != null) {
-                            touchPreviewPosition = position
-                            showTouchPreview(item, anchor)
-                        }
-                    }
-                }
-
-                MotionEvent.ACTION_UP -> finishTouchPreview("松手")
-                MotionEvent.ACTION_CANCEL -> finishTouchPreview("手势取消")
-            }
-        }
-
-        private fun itemViewAt(position: Int): View? {
-            val childIndex = position - grid.firstVisiblePosition
-            return childIndex.takeIf { it in 0 until grid.childCount }?.let(grid::getChildAt)
-        }
-
-        private fun showStatus(message: String, loading: Boolean) {
-            status.setOnClickListener(null)
-            status.text = message
-            status.visibility = View.VISIBLE
-            progress.visibility = if (loading) View.VISIBLE else View.GONE
-            grid.visibility = View.GONE
-        }
-
-        private fun showError(message: String, retry: () -> Unit) {
-            showStatus("$message\n\n点击重试", loading = false)
-            status.setOnClickListener { retry() }
-        }
-
-        private fun showGrid() {
-            status.visibility = View.GONE
-            progress.visibility = View.GONE
-            grid.visibility = View.VISIBLE
-        }
-    }
-
-    private inner class ItemAdapter(
-        private val items: List<PanelItem>,
-        private var fullContentEnabled: Boolean,
-    ) : BaseAdapter() {
+    private inner class PanelContentAdapter(
+        private val allPacks: List<PanelPack>,
+    ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         private val states = mutableSetOf<CellState>()
+        private val sectionItems = mutableMapOf<Int, List<PanelItem>>()
+        private var visiblePacks = visiblePanelPackPositions(allPacks, collapsedExpanded)
+        private var entries = buildEntries()
+        private var generation = 0
         private var memoryHits = 0
         private var memoryMisses = 0
         private var firstFrameHits = 0
         private var firstFrameMisses = 0
 
-        override fun getCount(): Int = items.size
-        override fun getItem(position: Int): PanelItem = items[position]
-        override fun getItemId(position: Int): Long = position.toLong()
+        override fun getItemCount(): Int = entries.size
 
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val image = (convertView as? ImageView) ?: ImageView(hostContext).apply {
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                layoutParams = AbsListView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, cellSize())
-                setPadding(dp(1))
-                setBackgroundColor(Color.TRANSPARENT)
+        override fun getItemViewType(position: Int): Int = when (entries[position]) {
+            is ContentEntry.Header -> CONTENT_HEADER_TYPE
+            is ContentEntry.Item -> CONTENT_ITEM_TYPE
+            ContentEntry.Footer -> CONTENT_FOOTER_TYPE
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder =
+            if (viewType == CONTENT_HEADER_TYPE) {
+                val row = LinearLayout(hostContext).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    layoutParams = RecyclerView.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(CONTENT_HEADER_HEIGHT_DP),
+                    )
+                    setPadding(dp(8), dp(8), dp(8), dp(4))
+                    addView(TextView(hostContext).apply {
+                        textSize = 14f
+                        setTextColor(foregroundColor)
+                        setTypeface(typeface, android.graphics.Typeface.BOLD)
+                        maxLines = 1
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(TextView(hostContext).apply {
+                        textSize = 12f
+                        setTextColor(secondaryColor)
+                    })
+                }
+                HeaderHolder(row)
+            } else if (viewType == CONTENT_ITEM_TYPE) {
+                ItemHolder(ImageView(hostContext).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, cellSize())
+                    setPadding(dp(1))
+                    setBackgroundColor(Color.TRANSPARENT)
+                })
+            } else {
+                FooterHolder(View(hostContext).apply { setBackgroundColor(Color.TRANSPARENT) })
             }
-            (image.tag as? CellState)?.let { old ->
-                old.active = false
-                old.fileTask?.cancel(false)
-                old.disposable?.dispose()
-                old.cachedTarget?.stop()
-                old.cachedLease?.close()
-                states.remove(old)
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            when (val entry = entries[position]) {
+                is ContentEntry.Header -> (holder as HeaderHolder).bind(
+                    allPacks[entry.packPosition],
+                    sectionItems[entry.packPosition]?.size,
+                )
+                is ContentEntry.Item -> bindItem(
+                    (holder as ItemHolder).image,
+                    sectionItems[entry.packPosition]?.getOrNull(entry.itemPosition),
+                    position,
+                )
+                ContentEntry.Footer -> (holder as FooterHolder).bind(trailingSpaceHeight())
             }
+        }
+
+        override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+            if (holder is ItemHolder) releaseCell(holder.image)
+        }
+
+        fun isHeader(position: Int): Boolean = when (entries.getOrNull(position)) {
+            is ContentEntry.Header, ContentEntry.Footer -> true
+            else -> false
+        }
+
+        fun headerPositionForPack(packPosition: Int): Int? =
+            entries.indexOfFirst { it == ContentEntry.Header(packPosition) }.takeIf { it >= 0 }
+
+        fun packPositionAt(adapterPosition: Int): Int? = when (val entry = entries.getOrNull(adapterPosition)) {
+            is ContentEntry.Header -> entry.packPosition
+            is ContentEntry.Item -> entry.packPosition
+            ContentEntry.Footer -> visiblePacks.lastOrNull()
+            null -> null
+        }
+
+        fun itemAtAdapterPosition(adapterPosition: Int): PanelItem? =
+            (entries.getOrNull(adapterPosition) as? ContentEntry.Item)?.let { entry ->
+                sectionItems[entry.packPosition]?.getOrNull(entry.itemPosition)
+            }
+
+        fun itemsForPack(packPosition: Int): List<PanelItem>? = sectionItems[packPosition]
+
+        fun lastContentPosition(): Int = entries.indexOfLast { entry -> entry != ContentEntry.Footer }
+
+        fun refreshTrailingSpace() {
+            entries.lastIndex.takeIf { entries.getOrNull(it) == ContentEntry.Footer }?.let(::notifyItemChanged)
+        }
+
+        fun setCollapsedExpanded(expanded: Boolean) {
+            val anchor = captureAnchor()
+            visiblePacks = visiblePanelPackPositions(allPacks, expanded)
+            entries = buildEntries()
+            notifyDataSetChanged()
+            loadVisibleSections()
+            contentList.post {
+                restoreAnchor(anchor)
+                syncActivePackFromScroll()
+            }
+        }
+
+        fun loadVisibleSections() {
+            val requestGeneration = generation
+            visiblePacks.forEach { packPosition ->
+                val pack = allPacks[packPosition]
+                val cacheKey = panelItemCacheKey(revision, pack)
+                val cached = panelItemCache[cacheKey]
+                if (cached != null) applyItems(packPosition, cached)
+                val dynamic = pack.id == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID ||
+                    pack.id == EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_ID
+                if (cached == null || dynamic) {
+                    metadataWorker.execute {
+                        runCatching { QqPanelRepository.listItems(hostContext, pack) }
+                            .onSuccess { items ->
+                                panelItemCache[cacheKey] = items
+                                mainHandler.post {
+                                    if (!destroyed.get() && generation == requestGeneration) {
+                                        applyItems(packPosition, items)
+                                    }
+                                }
+                            }.onFailure { error ->
+                                if (cached == null) {
+                                    QqPanelIntegration.log("读取连续表情分组失败：${pack.displayName}", error)
+                                } else {
+                                    QqPanelIntegration.log("刷新连续表情分组失败，继续使用缓存：${pack.displayName}", error)
+                                }
+                            }
+                    }
+                }
+            }
+        }
+
+        private fun applyItems(packPosition: Int, items: List<PanelItem>) {
+            if (sectionItems[packPosition] == items) return
+            val header = headerPositionForPack(packPosition)
+            val expected = entries.count { entry ->
+                entry is ContentEntry.Item && entry.packPosition == packPosition
+            }
+            sectionItems[packPosition] = items
+            if (header != null && expected == items.size) {
+                notifyItemRangeChanged(header, items.size + 1)
+            } else if (header != null) {
+                val anchor = captureAnchor()
+                entries = buildEntries()
+                notifyDataSetChanged()
+                contentList.post { restoreAnchor(anchor) }
+            }
+            if (packPosition == activePackPosition) {
+                startPreviewPreload(items, allPacks[packPosition].displayName)
+            }
+        }
+
+        private fun buildEntries(): List<ContentEntry> = buildList {
+            visiblePacks.forEach { packPosition ->
+                add(ContentEntry.Header(packPosition))
+                val itemCount = sectionItems[packPosition]?.size ?: allPacks[packPosition].itemCount
+                repeat(itemCount) { itemPosition -> add(ContentEntry.Item(packPosition, itemPosition)) }
+            }
+            add(ContentEntry.Footer)
+        }
+
+        private fun captureAnchor(): ContentAnchor? {
+            val layoutManager = contentLayoutManager ?: return null
+            val position = layoutManager.findFirstVisibleItemPosition().takeIf { it != RecyclerView.NO_POSITION }
+                ?: return null
+            val view = layoutManager.findViewByPosition(position) ?: return null
+            return ContentAnchor(entryKey(entries[position]), view.top - contentList.paddingTop)
+        }
+
+        private fun restoreAnchor(anchor: ContentAnchor?) {
+            if (anchor == null) return
+            val position = entries.indexOfFirst { entry -> entryKey(entry) == anchor.key }
+            if (position >= 0) contentLayoutManager?.scrollToPositionWithOffset(position, anchor.offset)
+        }
+
+        private fun entryKey(entry: ContentEntry): String = when (entry) {
+            is ContentEntry.Header -> "header:${allPacks[entry.packPosition].id}"
+            is ContentEntry.Item -> {
+                val pack = allPacks[entry.packPosition]
+                val item = sectionItems[entry.packPosition]?.getOrNull(entry.itemPosition)
+                "item:${pack.id}:${item?.packId.orEmpty()}:${item?.id ?: entry.itemPosition}"
+            }
+            ContentEntry.Footer -> "footer"
+        }
+
+        private fun trailingSpaceHeight(): Int {
+            val lastPackPosition = visiblePacks.lastOrNull() ?: return 0
+            val itemCount = sectionItems[lastPackPosition]?.size ?: allPacks[lastPackPosition].itemCount
+            val rows = (itemCount + panelColumns - 1) / panelColumns
+            val viewport = contentList.height - contentList.paddingTop - contentList.paddingBottom
+            return (viewport - dp(CONTENT_HEADER_HEIGHT_DP) - rows * cellSize()).coerceAtLeast(0)
+        }
+
+        private fun bindItem(image: ImageView, item: PanelItem?, adapterPosition: Int) {
+            releaseCell(image)
             image.setImageDrawable(null)
-            val item = getItem(position)
+            image.layoutParams = (image.layoutParams as RecyclerView.LayoutParams).apply { height = cellSize() }
+            image.contentDescription = item?.fileName ?: "正在读取表情"
+            image.setOnClickListener(null)
+            image.setOnLongClickListener(null)
+            if (item == null) return
+            image.setOnClickListener {
+                if (SystemClock.uptimeMillis() - previewEndedAt >= PREVIEW_CLICK_SUPPRESSION_MS) send(item)
+            }
+            image.setOnLongClickListener {
+                val position = contentList.getChildAdapterPosition(image)
+                    .takeIf { it != RecyclerView.NO_POSITION } ?: adapterPosition
+                beginTouchPreview(position, item, image)
+                true
+            }
             val state = CellState(item.packId, item.id)
             image.tag = state
             states += state
@@ -1109,8 +1017,6 @@ internal class EmoRepoPanelDialog private constructor(
             } else {
                 firstFrameMisses += 1
             }
-            // ViewPager 邻页只保留已有首帧，选中后才读取和解码完整内容。
-            if (!fullContentEnabled) return image
             val memoryValue = if (item.animated) {
                 null
             } else {
@@ -1137,7 +1043,7 @@ internal class EmoRepoPanelDialog private constructor(
                             QqPanelIntegration.log("保护 QQ 面板内存缓存原文件失败", error)
                         }
                 }
-                return image
+                return
             }
             memoryMisses += 1
             state.fileTask = imageWorker.submit {
@@ -1175,17 +1081,23 @@ internal class EmoRepoPanelDialog private constructor(
                         QqPanelIntegration.log("加载 QQ 面板表情失败", error)
                     }
             }
-            return image
         }
 
-        fun setFullContentEnabled(enabled: Boolean) {
-            if (fullContentEnabled == enabled) return
-            fullContentEnabled = enabled
-            releaseStates(logStatistics = false)
-            notifyDataSetChanged()
+        private fun releaseCell(image: ImageView) {
+            val state = image.tag as? CellState ?: return
+            state.active = false
+            state.fileTask?.cancel(false)
+            state.disposable?.dispose()
+            state.cachedTarget?.stop()
+            state.cachedLease?.close()
+            states.remove(state)
+            image.tag = null
         }
 
-        fun dispose() = releaseStates(logStatistics = true)
+        fun dispose() {
+            generation += 1
+            releaseStates(logStatistics = true)
+        }
 
         private fun releaseStates(logStatistics: Boolean) {
             states.forEach {
@@ -1204,6 +1116,103 @@ internal class EmoRepoPanelDialog private constructor(
                     "cacheBytes=${cache?.size ?: 0}/${cache?.maxSize ?: 0}",
             )
         }
+
+        private inner class HeaderHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            private val row = itemView as LinearLayout
+            private val name = row.getChildAt(0) as TextView
+            private val count = row.getChildAt(1) as TextView
+
+            fun bind(pack: PanelPack, loadedCount: Int?) {
+                name.text = pack.displayName
+                count.text = (loadedCount ?: pack.itemCount).toString()
+            }
+        }
+
+        private inner class ItemHolder(val image: ImageView) : RecyclerView.ViewHolder(image)
+
+        private inner class FooterHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            fun bind(height: Int) {
+                itemView.layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
+            }
+        }
+    }
+
+    private fun beginTouchPreview(position: Int, item: PanelItem, anchor: View) {
+        touchPreviewActive = true
+        touchPreviewPosition = position
+        showTouchPreview(item, anchor)
+    }
+
+    private fun handleTouchPreviewMotion(event: MotionEvent) {
+        if (!touchPreviewActive) return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                val location = IntArray(2)
+                contentList.getLocationOnScreen(location)
+                val child = contentList.findChildViewUnder(
+                    event.rawX - location[0],
+                    event.rawY - location[1],
+                ) ?: return
+                val position = contentList.getChildAdapterPosition(child)
+                if (position != RecyclerView.NO_POSITION && position != touchPreviewPosition) {
+                    contentAdapter?.itemAtAdapterPosition(position)?.let { item ->
+                        touchPreviewPosition = position
+                        showTouchPreview(item, child)
+                    }
+                }
+            }
+
+            MotionEvent.ACTION_UP -> finishTouchPreview("松手")
+            MotionEvent.ACTION_CANCEL -> finishTouchPreview("手势取消")
+        }
+    }
+
+    private fun finishTouchPreview(reason: String) {
+        if (!touchPreviewActive) {
+            hideTouchPreview()
+            return
+        }
+        QqPanelIntegration.log("关闭按压预览：$reason")
+        touchPreviewActive = false
+        touchPreviewPosition = RecyclerView.NO_POSITION
+        previewEndedAt = SystemClock.uptimeMillis()
+        contentList.isPressed = false
+        contentList.cancelLongPress()
+        for (index in 0 until contentList.childCount) contentList.getChildAt(index).isPressed = false
+        hideTouchPreview()
+    }
+
+    private fun startPreviewPreload(items: List<PanelItem>, groupName: String) {
+        stopPreviewPreload()
+        if (items.isEmpty()) return
+        // 当前分组可见区优先，后台从后续项目开始并最终补齐首屏遗漏。
+        val visibleBoundary = (panelColumns * PRELOAD_VISIBLE_ROWS).coerceAtMost(items.size)
+        val ordered = items.drop(visibleBoundary) + items.take(visibleBoundary)
+        val candidates = ordered.filter { item -> QqPanelFirstFrameCache.get(item.id) == null }
+        if (candidates.isEmpty()) return
+        val completed = AtomicInteger()
+        val failed = AtomicInteger()
+        candidates.forEach { item ->
+            previewPreloadTasks += previewPreloadWorker.submit {
+                if (Thread.currentThread().isInterrupted || destroyed.get()) return@submit
+                val successful = runCatching {
+                    QqPanelFirstFrameCache.preload(hostContext, item)
+                }.onFailure { error ->
+                    QqPanelIntegration.log("预加载 QQ 面板首帧失败", error)
+                }.getOrDefault(false)
+                if (!successful) failed.incrementAndGet()
+                if (completed.incrementAndGet() == candidates.size) {
+                    QqPanelIntegration.log(
+                        "表情分组首帧预加载完成：group=$groupName，total=${candidates.size}，failed=${failed.get()}",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun stopPreviewPreload() {
+        previewPreloadTasks.forEach { task -> task.cancel(false) }
+        previewPreloadTasks.clear()
     }
 
     /** 引用身份保持稳定，避免可变加载句柄改变哈希值后无法从集合移除。 */
@@ -1235,6 +1244,14 @@ internal class EmoRepoPanelDialog private constructor(
         val coverItemId: String?,
         val itemCount: Int,
     )
+
+    private sealed interface ContentEntry {
+        data class Header(val packPosition: Int) : ContentEntry
+        data class Item(val packPosition: Int, val itemPosition: Int) : ContentEntry
+        data object Footer : ContentEntry
+    }
+
+    private data class ContentAnchor(val key: String, val offset: Int)
 
     /** 长按激活后从窗口入口接管余下触摸，避免子 View 竞争导致预览提前取消。 */
     private class PreviewTrackingDialog(
@@ -1293,15 +1310,7 @@ internal class EmoRepoPanelDialog private constructor(
         }
     }
 
-    private class StatefulGridView(context: Context) : GridView(context) {
-        fun captureScrollState(): Parcelable? = super.onSaveInstanceState()
-
-        fun restoreScrollState(state: Parcelable) {
-            super.onRestoreInstanceState(state)
-        }
-    }
-
-    /** 只接管明确的纵向抽屉手势，避免和网格滚动、左右翻页冲突。 */
+    /** 只接管明确的纵向抽屉手势，避免和连续表情列表滚动冲突。 */
     private class DrawerDismissLayout(
         context: Context,
         private val canDrag: (touchY: Float) -> Boolean,
@@ -1406,7 +1415,7 @@ internal class EmoRepoPanelDialog private constructor(
     }
 
     private fun cellSize(): Int =
-        ((pager.width.takeIf { it > 0 } ?: hostContext.resources.displayMetrics.widthPixels) -
+        ((contentList.width.takeIf { it > 0 } ?: hostContext.resources.displayMetrics.widthPixels) -
             dp(2) * (panelColumns - 1)) / panelColumns
 
     private fun dp(value: Int): Int =
@@ -1493,7 +1502,6 @@ internal class EmoRepoPanelDialog private constructor(
         private val panelItemCache = ConcurrentHashMap<PanelItemCacheKey, List<PanelItem>>()
         private var cachedPanelSnapshot: PanelSnapshot? = null
         private var current: EmoRepoPanelDialog? = null
-        private var lastSelectedPackId: String? = null
         private var sharedImageLoader: ImageLoader? = null
 
         fun show(context: Context, hostClassLoader: ClassLoader, contact: QqContact) {
@@ -1562,6 +1570,35 @@ internal class EmoRepoPanelDialog private constructor(
                 .filter { it.packId == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID }
                 .forEach(panelItemCache::remove)
             panelItemCache[panelItemCacheKey(snapshot.revision, updatedPack)] = updatedItems
+            val addedIndex = updatedPacks.indexOfFirst {
+                it.id == EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_ID
+            }
+            if (addedIndex >= 0) {
+                val addedPack = updatedPacks[addedIndex]
+                val cachedAdded = panelItemCache.entries.firstOrNull { (key, _) ->
+                    key.revision == snapshot.revision &&
+                        key.packId == EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_ID
+                }?.value
+                if (cachedAdded != null) {
+                    val filteredAdded = cachedAdded.filterNot { added ->
+                        added.packId == item.packId && added.id == item.id
+                    }
+                    panelItemCache.keys
+                        .filter { it.packId == EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_ID }
+                        .forEach(panelItemCache::remove)
+                    if (filteredAdded.isEmpty()) {
+                        updatedPacks.removeAt(addedIndex)
+                    } else {
+                        val updatedAddedPack = addedPack.copy(
+                            coverPackId = filteredAdded.first().packId,
+                            coverItemId = filteredAdded.first().id,
+                            itemCount = filteredAdded.size,
+                        )
+                        updatedPacks[addedIndex] = updatedAddedPack
+                        panelItemCache[panelItemCacheKey(snapshot.revision, updatedAddedPack)] = filteredAdded
+                    }
+                }
+            }
             cachedPanelSnapshot = snapshot.copy(packs = updatedPacks)
         }
 
@@ -1578,7 +1615,10 @@ internal class EmoRepoPanelDialog private constructor(
         private const val IMAGE_MEMORY_CACHE_BYTES = 128L * 1024L * 1024L
         private const val PREVIEW_SIZE_PX = 1024
         private const val PREVIEW_CLICK_SUPPRESSION_MS = 350L
-        private const val PAGER_LOOP_SWIPE_DP = 72
+        private const val CONTENT_HEADER_TYPE = 0
+        private const val CONTENT_ITEM_TYPE = 1
+        private const val CONTENT_FOOTER_TYPE = 2
+        private const val CONTENT_HEADER_HEIGHT_DP = 36
         private const val PRELOAD_VISIBLE_ROWS = 8
         private const val DRAWER_CLOSE_RATIO = 0.22f
         private const val DRAWER_CLOSE_VELOCITY = 1_200f

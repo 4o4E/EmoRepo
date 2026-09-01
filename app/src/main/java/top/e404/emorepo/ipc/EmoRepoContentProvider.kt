@@ -27,7 +27,6 @@ import top.e404.emorepo.repository.ManagementItemResult
 import top.e404.emorepo.repository.ManagementStatus
 import top.e404.emorepo.repository.RecentUsageRepository
 import top.e404.emorepo.repository.readImportBytes
-import top.e404.emorepo.protocol.index.EmoticonRecord
 
 class EmoRepoContentProvider : ContentProvider() {
     private lateinit var root: File
@@ -396,6 +395,9 @@ class EmoRepoContentProvider : ContentProvider() {
     private fun queryPacks(): Cursor = MatrixCursor(PACK_COLUMNS).apply {
         val packs = repository.listPacks()
         val recentItems = resolveRecentItems(packs)
+        val recentlyAddedItems = selectRecentlyAddedItems(packs, recentItems) { item ->
+            repository.imageFile(item.packId, item.record.name).isFile
+        }
         // 最近使用是面板虚拟包，不写入根索引，也不改变真实表情包排序。
         addRow(
             arrayOf<Any?>(
@@ -408,6 +410,19 @@ class EmoRepoContentProvider : ContentProvider() {
                 0,
             ),
         )
+        if (recentlyAddedItems.isNotEmpty()) {
+            addRow(
+                arrayOf<Any?>(
+                    EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_ID,
+                    EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_NAME,
+                    recentlyAddedItems.first().record.md5,
+                    recentlyAddedItems.first().packId,
+                    recentlyAddedItems.size,
+                    0,
+                    0,
+                ),
+            )
+        }
         packs.forEach { pack ->
             val records = pack.records
             addRow(
@@ -432,13 +447,16 @@ class EmoRepoContentProvider : ContentProvider() {
         require(offset >= 0) { "offset 不能小于 0" }
         require(limit in 1..EmoRepoIpcContract.MAXIMUM_PAGE_SIZE) { "limit 必须为 1..200" }
         return MatrixCursor(ITEM_COLUMNS).apply {
-            val items = if (packId == EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID) {
-                resolveRecentItems(repository.listPacks()).map { item ->
-                    ProviderItem(item.packId, item.record)
+            val items = when (packId) {
+                EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID -> resolveRecentItems(repository.listPacks())
+                EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_ID -> {
+                    val packs = repository.listPacks()
+                    selectRecentlyAddedItems(packs, resolveRecentItems(packs)) { item ->
+                        repository.imageFile(item.packId, item.record.name).isFile
+                    }
                 }
-            } else {
-                repository.getPack(packId).records.map { record ->
-                    ProviderItem(packId, record)
+                else -> repository.getPack(packId).records.map { record ->
+                    VirtualPanelItem(packId, record)
                 }
             }
             items.drop(offset).take(limit).forEach { item ->
@@ -457,7 +475,7 @@ class EmoRepoContentProvider : ContentProvider() {
         }
     }
 
-    private fun resolveRecentItems(packs: List<EmoticonPack>): List<RecentItem> {
+    private fun resolveRecentItems(packs: List<EmoticonPack>): List<VirtualPanelItem> {
         val settings = SettingsStore(requireNotNull(context).applicationContext).load()
         val byName = packs.associateBy { it.name }
         return RecentUsageRepository(root, settings.deviceId, settings.recentMaximumRecords)
@@ -466,7 +484,7 @@ class EmoRepoContentProvider : ContentProvider() {
                 val record = byName[usage.packageName]?.records?.firstOrNull { it.name == usage.name }
                     ?: return@mapNotNull null
                 if (!repository.imageFile(usage.packageName, record.name).isFile) return@mapNotNull null
-                RecentItem(usage.packageName, record)
+                VirtualPanelItem(usage.packageName, record)
             }
     }
 
@@ -496,16 +514,6 @@ class EmoRepoContentProvider : ContentProvider() {
         val apkLastModified: Long,
         val apkLength: Long,
         val className: String?,
-    )
-
-    private data class RecentItem(
-        val packId: String,
-        val record: EmoticonRecord,
-    )
-
-    private data class ProviderItem(
-        val packId: String,
-        val record: EmoticonRecord,
     )
 
     private companion object {
