@@ -18,7 +18,11 @@ EmoRepo 只发布两个渠道：
 - `x86`
 - `x86_64`
 
-CI 中两个渠道使用同一套持久签名凭据，保证同一应用 ID 的后续构建可以覆盖安装；本地没有 CI 凭据时，debug 仍使用 Android 默认调试签名，release 可以构建未签名产物用于源码检查，但不得发布。
+CI 和本地的 debug/release 都必须使用同一套生产签名，保证同一应用 ID 的任意已授权构建可以直接覆盖安装并真实验证 App 内更新。Gradle 不再回退 Android 默认调试证书，也不生成未签名 release；缺少配置、配置不完整或证书 SHA-256 与 `version.properties` 不一致时在配置期失败。
+
+- CI 继续使用 `EMOREPO_KEYSTORE_PATH`、`EMOREPO_STORE_PASSWORD`、`EMOREPO_KEY_ALIAS`、`EMOREPO_KEY_PASSWORD`。
+- 本地可以使用同名环境变量，或把 `local-signing.properties.example` 复制为被 Git 忽略的 `local-signing.properties`，填写 `keystorePath`、`storePassword`、`keyAlias`、`keyPassword`。
+- 生产 keystore 和密码不得提交、输出到日志或通过 GitHub Actions Artifact 导出；GitHub Secrets 无法安全读回，本机缺少私钥时必须由持有者线下提供。
 
 为避免 CI 和源码依赖预览 SDK，App 固定使用 `compileSdk=36`、`targetSdk=36` 和 `minSdk=24`，兼容 Android 7.0 及以上设备。Compose 固定使用 BOM `2026.06.01`（Foundation `1.11.4`），AndroidX Core 固定为 `1.17.0`；不得升级到要求 API 37/36.1 的 Compose `1.12` 或 Core `1.18+`，除非重新确认兼容基线。
 
@@ -52,7 +56,7 @@ APK 同时包含 Compose 依赖的 ABI 原生库，因此 CI 发布 universal �
 https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 ```
 
-当前 GitHub 仓库是 private，上述地址和 Release 资产需要有仓库读取权限的 GitHub 身份认证。若 App 未来需要无 Token 自动检查更新，必须先确认公开仓库、公开镜像或受控更新服务中的一种来源；不能在 APK 内内置 GitHub Token。
+当前 GitHub 仓库是 public，上述稳定地址和 Release 资产允许 App 匿名访问。App 内更新不得读取表情仓库 Git Token，也不得在 APK 内内置 GitHub Token；若仓库未来改回 private，必须重新确认独立认证方案，不能静默复用现有凭据。
 
 索引使用 UTF-8 JSON，结构如下：
 

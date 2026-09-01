@@ -76,3 +76,7 @@
 | HOOK-007 | QQ“添加到 EmoRepo”的目标列表和确认摘要标记已折叠表情包 | `architecture/qq-panel.md` | verified | `EmoRepoImportDialog`；“测试折叠”目标行和确认摘要“已折叠”徽标真机通过，取消未导入 |
 | SYNC-006 | Git 网络阶段不占用仓库内容锁，网络失败或等待不阻塞 App/QQ 只读访问 | `git/sync.md`、`android/runtime.md` | verified | `RepositoryLocks`、`JGitRepositoryService`、`JGitRepositoryServiceTest`；fetch 并发写入补提交 JVM 测试及真机 fetch 等待中 Provider 约 7 ms 查询通过 |
 | HOOK-008 | QQ 增加只读“最近添加”虚拟分组，并将所有分组连续拼接在单一纵向容器中浏览 | `architecture/qq-panel.md`、`android/runtime.md` | verified | `VirtualPanelItems`、`EmoRepoContentProvider`、`PanelContentAdapter`、`PanelNavigationTest`、`VirtualPanelItemsTest`；112 项 JVM 测试及“洛”中连续滚动、包栏自动跟随、滚动自动展开折叠、入口定位、横滑不切包、折叠末包直达、长按预览真机通过 |
+| UPDATE-001 | App 匿名检查 public GitHub Release，按设备 ABI 下载、校验并进入系统安装确认 | `release/in-app-updates.md`、`ui/app.md` | implemented | `GitHubUpdateClient`、`UpdateInstaller`、`AppUpdateModelsTest`、`GitHubUpdateClientTest`；历史 private `v0.4.0` 真机检查通过，public 匿名检查及真实下载/系统安装页待生产签名 Debug 验收 |
+| HOOK-009 | EmoRepo 静态图和 GIF 均以 QQ 表情图片语义发送和预览 | `architecture/qq-panel.md` | verified | `QqMessageSender`、`QqMessageSenderTest`；“洛”中 PNG/GIF 均由原始 subtype 0 调整为 7，表情气泡和静态表情预览真机通过，群频道待验收 |
+| RELEASE-004 | 本地和 CI 的 Debug/Release 均强制使用固定生产证书签名 | `release/ci-and-updates.md` | implemented | Gradle `production` signingConfig、证书 SHA-256 配置期校验、`local-signing.properties.example`；CI 待验证，本机缺少生产私钥无法重建 |
+| HOOK-010 | QQ 纵向滚动每进入一个新分组都将对应包入口强制居中 | `architecture/qq-panel.md` | implemented | `EmoRepoPanelDialog.centerPackTab`；生产签名 Debug 构建和真机验收待完成 |

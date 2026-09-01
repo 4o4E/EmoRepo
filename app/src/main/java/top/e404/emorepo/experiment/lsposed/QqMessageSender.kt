@@ -23,6 +23,7 @@ internal object QqMessageSender {
             check(file.isFile && file.length() > 0L) { "待发送表情文件不存在" }
             val contactObject = createContact(hostClassLoader, contact)
             val element = createPictureElement(hostClassLoader, contact, file)
+            applyEmoticonPictureSubtype(element, contact.chatType)
             val service = kernelMessageService(hostClassLoader)
             val serverTime = serverTime(hostClassLoader)
             val uniqueId = service.javaClass.methods.firstOrNull { method ->
@@ -128,6 +129,28 @@ internal object QqMessageSender {
             }.invoke(msgService)
     }
 
+    private fun applyEmoticonPictureSubtype(element: Any, chatType: Int) {
+        val picElement = requireNotNull(
+            element.javaClass.methods.firstOrNull { method ->
+                method.name == "getPicElement" && method.parameterTypes.isEmpty()
+            }?.invoke(element),
+        ) { "QQ 图片消息缺少 PicElement" }
+        val getSubtype = picElement.javaClass.methods.firstOrNull { method ->
+            method.name == "getPicSubType" && method.parameterTypes.isEmpty()
+        } ?: error("QQ PicElement 不支持读取图片子类型")
+        val original = (getSubtype.invoke(picElement) as Number).toInt()
+        val target = emoticonPicSubtype(chatType, original)
+        if (target != original) {
+            val setter = picElement.javaClass.methods.firstOrNull { method ->
+                method.name == "setPicSubType" && method.parameterTypes.contentEquals(
+                    arrayOf(Int::class.javaPrimitiveType),
+                )
+            } ?: error("QQ PicElement 不支持设置图片子类型")
+            setter.invoke(picElement, target)
+        }
+        QqPanelIntegration.log("QQ 表情图片子类型：original=$original，final=$target")
+    }
+
     private fun serverTime(classLoader: ClassLoader): Long {
         val clazz = Class.forName(SERVER_TIME_CLASS, false, classLoader)
         return clazz.methods.single { method ->
@@ -202,6 +225,12 @@ internal object QqMessageSender {
     private const val IOPERATE_CALLBACK_CLASS =
         "com.tencent.qqnt.kernel.nativeinterface.IOperateCallback"
     private const val SEND_CALLBACK_TIMEOUT_MILLIS = 60_000L
+}
+
+internal fun emoticonPicSubtype(chatType: Int, originalSubtype: Int): Int = when {
+    chatType == 4 -> originalSubtype
+    originalSubtype != 0 -> originalSubtype
+    else -> 7
 }
 
 internal data class SendResult(val code: Int, val message: String?) {

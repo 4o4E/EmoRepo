@@ -16,14 +16,6 @@ internal fun orderPanelPacksForBrowsing(items: List<PanelPack>): List<PanelPack>
 internal fun visiblePanelPackPositions(items: List<PanelPack>, collapsedExpanded: Boolean): List<Int> =
     items.indices.filter { position -> !items[position].collapsed || collapsedExpanded }
 
-internal fun shouldRepositionPackTab(
-    targetPosition: Int,
-    firstCompletelyVisible: Int,
-    lastCompletelyVisible: Int,
-): Boolean = firstCompletelyVisible < 0 ||
-    lastCompletelyVisible < firstCompletelyVisible ||
-    targetPosition !in firstCompletelyVisible..lastCompletelyVisible
-
 internal fun shouldAutoExpandCollapsed(
     collapsedExpanded: Boolean,
     hasCollapsedPacks: Boolean,

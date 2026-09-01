@@ -56,14 +56,6 @@ class PanelNavigationTest {
     }
 
     @Test
-    fun `pack tab repositions only when selected entry is not fully visible`() {
-        assertEquals(false, shouldRepositionPackTab(3, 1, 5))
-        assertEquals(true, shouldRepositionPackTab(6, 1, 5))
-        assertEquals(true, shouldRepositionPackTab(0, 1, 5))
-        assertEquals(true, shouldRepositionPackTab(0, -1, -1))
-    }
-
-    @Test
     fun `collapsed packs auto expand only when user scroll reaches normal content end`() {
         assertEquals(true, shouldAutoExpandCollapsed(false, true, true, 10, 99, 99))
         assertEquals(false, shouldAutoExpandCollapsed(true, true, true, 10, 99, 99))

@@ -5,6 +5,7 @@ import android.app.Application
 import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
@@ -26,6 +27,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.e404.emorepo.config.AppSettings
+import top.e404.emorepo.BuildConfig
 import top.e404.emorepo.config.SettingsStore
 import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.config.SetupInput
@@ -33,6 +35,7 @@ import top.e404.emorepo.config.SyncStatus
 import top.e404.emorepo.config.validated
 import top.e404.emorepo.diagnostics.DiagnosticExporter
 import top.e404.emorepo.diagnostics.DiagnosticLogger
+import top.e404.emorepo.diagnostics.DiagnosticSanitizer
 import top.e404.emorepo.git.GitRepositoryService
 import top.e404.emorepo.git.GitSyncExecutor
 import top.e404.emorepo.git.GitSyncScheduler
@@ -49,6 +52,12 @@ import top.e404.emorepo.repository.RecentUsageRepository
 import top.e404.emorepo.repository.RepositoryLocks
 import top.e404.emorepo.repository.readImportBytes
 import top.e404.emorepo.security.KeystoreTokenStore
+import top.e404.emorepo.update.AppUpdatePhase
+import top.e404.emorepo.update.AppUpdateUiState
+import top.e404.emorepo.update.GitHubUpdateClient
+import top.e404.emorepo.update.UpdateCandidate
+import top.e404.emorepo.update.UpdateInstaller
+import top.e404.emorepo.update.validateUpdateCandidate
 
 @Stable
 class EmoRepoState(
@@ -58,14 +67,18 @@ class EmoRepoState(
     private val repositoryDirectory = File(context.filesDir, "repository")
     private val settingsStore = SettingsStore(context)
     private val tokenStore = KeystoreTokenStore(context)
+    private val updateClient = GitHubUpdateClient()
     private val gitService: GitRepositoryService = JGitRepositoryService()
     private val uiPreferences = context.getSharedPreferences("ui", Context.MODE_PRIVATE)
-    private val repositoryChangeObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val repositoryChangeObserver = object : ContentObserver(mainHandler) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
             refreshRepositoryContent()
         }
     }
     private var initialReloadRequested = false
+    private var updateCandidate: UpdateCandidate? = null
+    private var downloadedUpdateFile: File? = null
 
     val repository = EmoticonRepository(repositoryDirectory)
 
@@ -85,6 +98,8 @@ class EmoRepoState(
     var busy by mutableStateOf(false)
         private set
     var message by mutableStateOf<String?>(null)
+        private set
+    var updateState by mutableStateOf(AppUpdateUiState())
         private set
 
     val repositoryConfigured: Boolean
@@ -311,6 +326,167 @@ class EmoRepoState(
 
     fun refreshSyncStatus() {
         syncStatus = settingsStore.loadSyncStatus()
+    }
+
+    fun checkForUpdate() {
+        if (updateState.phase in setOf(AppUpdatePhase.CHECKING, AppUpdatePhase.DOWNLOADING)) return
+        scope.launch {
+            updateState = AppUpdateUiState(
+                phase = AppUpdatePhase.CHECKING,
+                message = "正在检查 GitHub 最新版本…",
+            )
+            updateCandidate = null
+            downloadedUpdateFile = null
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    updateClient.clearCachedUpdates(File(context.cacheDir, "updates"))
+                    val (release, index) = updateClient.latestRelease()
+                    validateUpdateCandidate(
+                        release = release,
+                        index = index,
+                        supportedAbis = Build.SUPPORTED_ABIS.toList(),
+                        currentVersionCode = BuildConfig.VERSION_CODE,
+                        sdkInt = Build.VERSION.SDK_INT,
+                        expectedApplicationId = BuildConfig.APPLICATION_ID,
+                        expectedCertificateSha256 = BuildConfig.RELEASE_SIGNING_CERTIFICATE_SHA256,
+                    )
+                }
+            }
+            result.onSuccess { candidate ->
+                if (candidate == null) {
+                    updateState = AppUpdateUiState(
+                        phase = AppUpdatePhase.LATEST,
+                        message = "当前已是最新版本 ${BuildConfig.VERSION_NAME}。",
+                    )
+                } else {
+                    updateCandidate = candidate
+                    val compatible = UpdateInstaller.currentSignatureMatchesRelease(context)
+                    updateState = AppUpdateUiState(
+                        phase = AppUpdatePhase.AVAILABLE,
+                        latestVersionName = candidate.versionName,
+                        downloadEnabled = compatible,
+                        message = if (compatible) {
+                            "发现新版本 ${candidate.versionName}，已选择 ${candidate.artifact.abi} APK。"
+                        } else {
+                            "发现新版本 ${candidate.versionName}，但当前是本地调试签名，不能覆盖安装正式版。请勿卸载，以免删除私有仓库。"
+                        },
+                    )
+                    if (!compatible) updateCandidate = null
+                }
+                DiagnosticLogger.info(
+                    "app_update",
+                    "check_succeeded",
+                    fields = mapOf("updateAvailable" to (candidate != null)),
+                )
+            }.onFailure { error ->
+                val detail = DiagnosticSanitizer.mostSpecificMessage(error)
+                updateState = AppUpdateUiState(AppUpdatePhase.ERROR, message = detail)
+                DiagnosticLogger.error(
+                    component = "app_update",
+                    event = "check_failed",
+                    message = "检查更新失败",
+                    error = error,
+                )
+            }
+        }
+    }
+
+    fun downloadUpdate() {
+        val candidate = updateCandidate ?: return
+        if (updateState.phase == AppUpdatePhase.DOWNLOADING) return
+        scope.launch {
+            updateState = AppUpdateUiState(
+                phase = AppUpdatePhase.DOWNLOADING,
+                latestVersionName = candidate.versionName,
+                progressPercent = 0,
+                downloadEnabled = false,
+                message = "正在下载 ${candidate.artifact.fileName}…",
+            )
+            var lastProgress = -1
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val file = updateClient.download(
+                        candidate,
+                        File(context.cacheDir, "updates"),
+                    ) { downloaded, total ->
+                        val progress = ((downloaded * 100L) / total.coerceAtLeast(1L)).toInt().coerceIn(0, 100)
+                        if (progress != lastProgress) {
+                            lastProgress = progress
+                            mainHandler.post {
+                                if (updateState.phase == AppUpdatePhase.DOWNLOADING) {
+                                    updateState = updateState.copy(progressPercent = progress)
+                                }
+                            }
+                        }
+                    }
+                    UpdateInstaller.verifyDownloadedApk(context, file)
+                    file
+                }
+            }
+            result.onSuccess { file ->
+                downloadedUpdateFile = file
+                updateState = AppUpdateUiState(
+                    phase = AppUpdatePhase.READY_TO_INSTALL,
+                    latestVersionName = candidate.versionName,
+                    progressPercent = 100,
+                    downloadEnabled = false,
+                    installEnabled = true,
+                    message = "下载和校验完成，准备打开系统安装器。",
+                )
+                DiagnosticLogger.info("app_update", "download_verified")
+            }.onFailure { error ->
+                val detail = DiagnosticSanitizer.mostSpecificMessage(error)
+                updateState = AppUpdateUiState(
+                    phase = AppUpdatePhase.ERROR,
+                    latestVersionName = candidate.versionName,
+                    message = detail,
+                )
+                DiagnosticLogger.error(
+                    component = "app_update",
+                    event = "download_failed",
+                    message = "下载更新失败",
+                    error = error,
+                )
+            }
+        }
+    }
+
+    fun requestUpdateInstall(context: Context, requestPermission: (android.content.Intent) -> Unit) {
+        val file = downloadedUpdateFile ?: return
+        runCatching {
+            UpdateInstaller.verifyDownloadedApk(context, file)
+            if (!UpdateInstaller.canRequestInstalls(context)) {
+                updateState = updateState.copy(message = "请允许表情仓安装未知应用，返回后将继续打开安装器。")
+                requestPermission(UpdateInstaller.unknownSourcesIntent(context))
+            } else {
+                context.startActivity(UpdateInstaller.installIntent(context, file))
+            }
+        }.onFailure(::handleInstallFailure)
+    }
+
+    fun resumeUpdateInstall(context: Context) {
+        val file = downloadedUpdateFile ?: return
+        if (!UpdateInstaller.canRequestInstalls(context)) {
+            updateState = updateState.copy(
+                phase = AppUpdatePhase.ERROR,
+                installEnabled = true,
+                message = "未获得安装未知应用权限，APK 已保留，可再次点击安装。",
+            )
+            return
+        }
+        runCatching {
+            UpdateInstaller.verifyDownloadedApk(context, file)
+            context.startActivity(UpdateInstaller.installIntent(context, file))
+        }.onFailure(::handleInstallFailure)
+    }
+
+    private fun handleInstallFailure(error: Throwable) {
+        updateState = updateState.copy(
+            phase = AppUpdatePhase.ERROR,
+            installEnabled = downloadedUpdateFile?.isFile == true,
+            message = error.message ?: "无法打开系统安装器",
+        )
+        DiagnosticLogger.error("app_update", "install_launch_failed", error = error)
     }
 
     fun updatePackLayout(layout: PackLayout) {

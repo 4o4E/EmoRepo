@@ -341,17 +341,14 @@ internal class EmoRepoPanelDialog private constructor(
             startPreviewPreload(contentAdapter?.itemsForPack(position).orEmpty(), packs[position].displayName)
         }
         tabAdapter?.select(position)
-        ensurePackTabVisible(position)
+        centerPackTab(position)
     }
 
-    private fun ensurePackTabVisible(packPosition: Int) {
+    private fun centerPackTab(packPosition: Int) {
         val tabPosition = tabAdapter?.tabPositionForPack(packPosition) ?: return
         packTabs.post {
             if (destroyed.get()) return@post
             val layoutManager = packTabs.layoutManager as? LinearLayoutManager ?: return@post
-            val first = layoutManager.findFirstCompletelyVisibleItemPosition()
-            val last = layoutManager.findLastCompletelyVisibleItemPosition()
-            if (!shouldRepositionPackTab(tabPosition, first, last)) return@post
             val centeredOffset = ((packTabs.width - dp(PACK_TAB_WIDTH_DP)) / 2).coerceAtLeast(0)
             layoutManager.scrollToPositionWithOffset(tabPosition, centeredOffset)
         }

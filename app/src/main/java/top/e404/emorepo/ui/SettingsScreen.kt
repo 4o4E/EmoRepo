@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -33,9 +34,12 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 import top.e404.emorepo.config.SyncPhase
+import top.e404.emorepo.BuildConfig
+import top.e404.emorepo.update.AppUpdatePhase
 
 @Composable
 fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
+    val context = LocalContext.current
     val current = state.settings
     var authorName by remember(current) { mutableStateOf(current.authorName) }
     var authorEmail by remember(current) { mutableStateOf(current.authorEmail) }
@@ -53,8 +57,18 @@ fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
     ) { destination ->
         if (destination != null) state.exportDiagnostics(destination)
     }
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        state.resumeUpdateInstall(context)
+    }
 
     LaunchedEffect(Unit) { state.refreshSyncStatus() }
+    LaunchedEffect(state.updateState.phase) {
+        if (state.updateState.phase == AppUpdatePhase.READY_TO_INSTALL) {
+            state.requestUpdateInstall(context, installPermissionLauncher::launch)
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.padding(horizontal = 16.dp),
@@ -68,6 +82,36 @@ fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
             ) {
                 OutlinedButton(onClick = onBack) { Text("返回") }
                 Text("软件设置", style = MaterialTheme.typography.titleLarge)
+            }
+        }
+        item {
+            SettingsCard("软件更新") {
+                Text("当前版本：${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
+                state.updateState.latestVersionName?.let { version -> Text("最新版本：$version") }
+                Text(state.updateState.message)
+                state.updateState.progressPercent?.let { progress -> Text("下载进度：$progress%") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = state::checkForUpdate,
+                        enabled = state.updateState.phase !in setOf(
+                            AppUpdatePhase.CHECKING,
+                            AppUpdatePhase.DOWNLOADING,
+                        ),
+                    ) { Text(if (state.updateState.phase == AppUpdatePhase.CHECKING) "检查中" else "检查更新") }
+                    if (state.updateState.phase == AppUpdatePhase.AVAILABLE) {
+                        Button(
+                            onClick = state::downloadUpdate,
+                            enabled = state.updateState.downloadEnabled,
+                        ) { Text("下载并安装") }
+                    }
+                    if (state.updateState.installEnabled) {
+                        Button(
+                            onClick = {
+                                state.requestUpdateInstall(context, installPermissionLauncher::launch)
+                            },
+                        ) { Text("安装更新") }
+                    }
+                }
             }
         }
         item {

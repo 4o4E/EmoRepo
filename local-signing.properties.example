@@ -1,0 +1,6 @@
+# 复制为 local-signing.properties，并填写与 GitHub Actions 相同的生产签名。
+# 该文件已被 .gitignore 排除，绝对不能提交真实密码或 keystore。
+keystorePath=C:/secure/emorepo-release.jks
+storePassword=replace-me
+keyAlias=replace-me
+keyPassword=replace-me

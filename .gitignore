@@ -3,6 +3,7 @@
 build/
 **/build/
 local.properties
+local-signing.properties
 *.iml
 .idea/
 .DS_Store

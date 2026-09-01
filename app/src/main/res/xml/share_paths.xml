@@ -3,4 +3,7 @@
     <files-path
         name="repository_images"
         path="repository/" />
+    <cache-path
+        name="update_apks"
+        path="updates/" />
 </paths>

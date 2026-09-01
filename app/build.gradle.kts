@@ -1,4 +1,6 @@
 import java.util.Properties
+import java.security.KeyStore
+import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -13,6 +15,9 @@ val versionProperties = Properties().apply {
 val baseVersion = requireNotNull(versionProperties.getProperty("baseVersion")) {
     "version.properties 缺少 baseVersion"
 }
+val releaseSigningCertificateSha256 = requireNotNull(
+    versionProperties.getProperty("signingCertificateSha256"),
+) { "version.properties 缺少 signingCertificateSha256" }
 val baseVersionParts = baseVersion.split('.').map { part ->
     part.toIntOrNull() ?: error("baseVersion 必须是 SemVer：$baseVersion")
 }
@@ -35,15 +40,36 @@ val configuredVersionName = providers.gradleProperty("emorepo.versionName")
 val configuredVersionCode = providers.gradleProperty("emorepo.versionCode")
     .map { value -> value.toIntOrNull() ?: error("emorepo.versionCode 必须是整数") }
     .orElse(baseVersionCode)
-val ciKeystorePath = providers.environmentVariable("EMOREPO_KEYSTORE_PATH").orNull
-val ciStorePassword = providers.environmentVariable("EMOREPO_STORE_PASSWORD").orNull
-val ciKeyAlias = providers.environmentVariable("EMOREPO_KEY_ALIAS").orNull
-val ciKeyPassword = providers.environmentVariable("EMOREPO_KEY_PASSWORD").orNull
-val signingValues = listOf(ciKeystorePath, ciStorePassword, ciKeyAlias, ciKeyPassword)
-val hasCiSigning = signingValues.any { value -> !value.isNullOrBlank() }
+val localSigningProperties = Properties().apply {
+    rootProject.file("local-signing.properties").takeIf { it.isFile }?.inputStream()?.use(::load)
+}
+fun signingValue(environmentName: String, propertyName: String): String? =
+    providers.environmentVariable(environmentName).orNull?.takeIf(String::isNotBlank)
+        ?: localSigningProperties.getProperty(propertyName)?.takeIf(String::isNotBlank)
 
-if (hasCiSigning && signingValues.any { value -> value.isNullOrBlank() }) {
-    error("CI 签名配置不完整，必须同时提供 keystore、store password、alias 和 key password")
+val signingKeystorePath = signingValue("EMOREPO_KEYSTORE_PATH", "keystorePath")
+val signingStorePassword = signingValue("EMOREPO_STORE_PASSWORD", "storePassword")
+val signingKeyAlias = signingValue("EMOREPO_KEY_ALIAS", "keyAlias")
+val signingKeyPassword = signingValue("EMOREPO_KEY_PASSWORD", "keyPassword")
+require(listOf(signingKeystorePath, signingStorePassword, signingKeyAlias, signingKeyPassword).all { !it.isNullOrBlank() }) {
+    "Debug 和 Release 必须使用生产签名；请配置 local-signing.properties 或 EMOREPO_* 环境变量"
+}
+val signingKeystoreFile = rootProject.file(requireNotNull(signingKeystorePath))
+require(signingKeystoreFile.isFile) { "生产 keystore 不存在：$signingKeystoreFile" }
+val signingCertificate = listOf("JKS", "PKCS12").firstNotNullOfOrNull { type ->
+    runCatching {
+        KeyStore.getInstance(type).apply {
+            signingKeystoreFile.inputStream().use { input ->
+                load(input, requireNotNull(signingStorePassword).toCharArray())
+            }
+        }.getCertificate(requireNotNull(signingKeyAlias))
+    }.getOrNull()
+} ?: error("无法从生产 keystore 读取别名 $signingKeyAlias")
+val actualSigningCertificateSha256 = MessageDigest.getInstance("SHA-256")
+    .digest(signingCertificate.encoded)
+    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+require(actualSigningCertificateSha256 == releaseSigningCertificateSha256) {
+    "本地/CI keystore 证书不是 EmoRepo 固定生产证书"
 }
 
 android {
@@ -58,33 +84,32 @@ android {
         targetSdk = 36
         versionCode = configuredVersionCode.get()
         versionName = configuredVersionName.get()
+        buildConfigField(
+            "String",
+            "RELEASE_SIGNING_CERTIFICATE_SHA256",
+            "\"$releaseSigningCertificateSha256\"",
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
-        if (hasCiSigning) {
-            create("ci") {
-                storeFile = file(requireNotNull(ciKeystorePath))
-                storePassword = requireNotNull(ciStorePassword)
-                keyAlias = requireNotNull(ciKeyAlias)
-                keyPassword = requireNotNull(ciKeyPassword)
-            }
+        create("production") {
+            storeFile = signingKeystoreFile
+            storePassword = requireNotNull(signingStorePassword)
+            keyAlias = requireNotNull(signingKeyAlias)
+            keyPassword = requireNotNull(signingKeyPassword)
         }
     }
 
     buildTypes {
         getByName("debug") {
             isDebuggable = true
-            if (hasCiSigning) {
-                signingConfig = signingConfigs.getByName("ci")
-            }
+            signingConfig = signingConfigs.getByName("production")
         }
         getByName("release") {
             isDebuggable = false
-            if (hasCiSigning) {
-                signingConfig = signingConfigs.getByName("ci")
-            }
+            signingConfig = signingConfigs.getByName("production")
         }
     }
 

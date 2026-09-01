@@ -23,6 +23,7 @@
 17. [`decisions/0005-standalone-lsposed.md`](decisions/0005-standalone-lsposed.md)：独立 LSPosed QQ 适配决策。
 18. [`architecture/qq-panel.md`](architecture/qq-panel.md)：QQ 长按入口、EmoRepo 面板、发送和导入闭环。
 19. [`diagnostics/logging.md`](diagnostics/logging.md)：文件日志、脱敏、轮转、同步恢复和导出诊断包。
+20. [`release/in-app-updates.md`](release/in-app-updates.md)：App 内检查、下载、校验和安装 GitHub Release。
 
 ## 状态
 
