@@ -71,3 +71,4 @@
 | SYNC-005 | 同步按阶段记录完整异常，并安全恢复陈旧 Git 索引锁 | `diagnostics/logging.md` | verified | `GitSyncExecutor`、`JGitRepositoryService`；陈旧锁恢复/损坏索引保留 JVM 测试，0.3.1 真机恢复 23.7 小时旧锁并完成 add/fetch/rebase/校验/push |
 | HOOK-005 | QQ 面板将折叠包连续置于分页末尾并在同一包栏内展开；横向分页首尾循环且恢复各包网格滚动位置 | `architecture/qq-panel.md` | implemented | `PanelNavigation`、`PackTabAdapter`、`StatefulGridView`、`PanelNavigationTest`；横向首尾循环、纵向不切包和循环后滚动行恢复真机通过，真实折叠包同栏展开待验收 |
 | HOOK-006 | QQ“添加到 EmoRepo”目标列表上方显示等比居中的消息首图预览 | `architecture/qq-panel.md` | verified | `EmoRepoImportDialog`、`EmoRepoMessageMenuHook`；CPH2609 在“洛”中首图等比居中预览、取消不导入且无错误日志真机验收 |
+| UI-023 | 表情包长按可切换折叠，主页隐藏数量并完整显示名称，详情显示数量，新建框自动聚焦且成功提示缩短 | `ui/app.md` | implemented | `PackListScreen`、`PackListCard`、`PackGridCard`、`PackNameDialog`、`PackManagerScreen`、`EmoRepoState`；真机待验证 |

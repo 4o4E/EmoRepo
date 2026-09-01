@@ -19,6 +19,7 @@ import java.util.concurrent.CancellationException
 import kotlin.concurrent.withLock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.e404.emorepo.config.AppSettings
@@ -298,6 +299,19 @@ class EmoRepoState(
         )
     }
 
+    fun togglePackCollapsed(name: String) {
+        val current = packs.map { PackIndexRecord(it.name, it.collapsed) }
+        if (current.none { it.name == name }) {
+            message = "表情包不存在，请刷新后重试"
+            return
+        }
+        updatePackArrangement(
+            current.map { record ->
+                if (record.name == name) record.copy(collapsed = !record.collapsed) else record
+            },
+        )
+    }
+
     fun preloadPack(packName: String) {
         val pack = packs.firstOrNull { it.name == packName } ?: return
         scope.launch {
@@ -307,6 +321,15 @@ class EmoRepoState(
 
     fun dismissMessage() {
         message = null
+    }
+
+    fun dismissMessageAfter(delayMillis: Long) {
+        require(delayMillis >= 0L) { "提示停留时间不能小于 0" }
+        val expected = message ?: return
+        scope.launch {
+            delay(delayMillis)
+            if (message == expected) message = null
+        }
     }
 
     fun manage(

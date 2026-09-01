@@ -40,6 +40,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,10 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import top.e404.emorepo.R
 import top.e404.emorepo.repository.EmoticonPack
@@ -104,7 +106,7 @@ fun PackListScreen(
             }
             Text(
                 if (draftArrangement == null) {
-                    "共 ${state.packs.size} 个表情包，${state.packs.sumOf { it.records.size }} 张表情"
+                    "共 ${state.packs.size} 个表情包"
                 } else {
                     "排序模式：拖动表情包调整顺序"
                 },
@@ -175,6 +177,12 @@ fun PackListScreen(
                     TextButton(
                         onClick = {
                             menuPack = null
+                            state.togglePackCollapsed(pack.name)
+                        },
+                    ) { Text(if (pack.collapsed) "取消折叠" else "折叠") }
+                    TextButton(
+                        onClick = {
+                            menuPack = null
                             draftArrangement = state.packs.map { PackIndexRecord(it.name, it.collapsed) }
                         },
                     ) { Text("进入编辑") }
@@ -216,6 +224,7 @@ fun PackListScreen(
                 state.manage(
                     operationName = "create_pack",
                     operation = { createPack(name); "已创建表情包 $name" },
+                    onSuccess = { state.dismissMessageAfter(CREATE_PACK_MESSAGE_MILLIS) },
                 )
             },
         )
@@ -544,11 +553,8 @@ private fun PackListCard(
                 Text(
                     pack.name,
                     style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Text("${pack.records.size} 个", style = MaterialTheme.typography.bodySmall)
                 if (editing) {
                     TextButton(
                         onClick = onToggleCollapsed,
@@ -594,15 +600,6 @@ private fun PackGridCard(
                         pack.name,
                         color = Color.White,
                         style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "${pack.records.size} 个",
-                        color = Color.White.copy(alpha = 0.78f),
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(start = 4.dp),
                     )
                 }
             }
@@ -720,6 +717,10 @@ private fun PackNameDialog(
     onConfirm: (String) -> Unit,
 ) {
     var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(initialName) {
+        if (initialName.isEmpty()) focusRequester.requestFocus()
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -729,6 +730,7 @@ private fun PackNameDialog(
                 onValueChange = { name = it },
                 label = { Text("表情包名称") },
                 singleLine = true,
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
             )
         },
         confirmButton = {
@@ -737,6 +739,8 @@ private fun PackNameDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
+
+private const val CREATE_PACK_MESSAGE_MILLIS = 1_500L
 
 internal fun <T> movePackItem(items: List<T>, fromIndex: Int, toIndex: Int): List<T> {
     require(fromIndex in items.indices) { "fromIndex 超出表情包列表范围" }

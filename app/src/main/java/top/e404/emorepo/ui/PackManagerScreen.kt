@@ -204,12 +204,14 @@ private fun PackManager(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onBack) { Text("返回") }
-            Text(
-                pack.name,
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
+                Text(pack.name, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "共 ${pack.records.size} 个表情",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             TextButton(
                 onClick = if (editing) onComplete else onEdit,
                 enabled = !state.busy,
