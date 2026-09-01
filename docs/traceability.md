@@ -78,5 +78,5 @@
 | HOOK-008 | QQ 增加只读“最近添加”虚拟分组，并将所有分组连续拼接在单一纵向容器中浏览 | `architecture/qq-panel.md`、`android/runtime.md` | verified | `VirtualPanelItems`、`EmoRepoContentProvider`、`PanelContentAdapter`、`PanelNavigationTest`、`VirtualPanelItemsTest`；112 项 JVM 测试及“洛”中连续滚动、包栏自动跟随、滚动自动展开折叠、入口定位、横滑不切包、折叠末包直达、长按预览真机通过 |
 | UPDATE-001 | App 匿名检查 public GitHub Release，按设备 ABI 下载、校验并进入系统安装确认 | `release/in-app-updates.md`、`ui/app.md` | implemented | `GitHubUpdateClient`、`UpdateInstaller`、`AppUpdateModelsTest`、`GitHubUpdateClientTest`；历史 private `v0.4.0` 真机检查通过，public 匿名检查及真实下载/系统安装页待生产签名 Debug 验收 |
 | HOOK-009 | EmoRepo 静态图和 GIF 均以 QQ 表情图片语义发送和预览 | `architecture/qq-panel.md` | verified | `QqMessageSender`、`QqMessageSenderTest`；“洛”中 PNG/GIF 均由原始 subtype 0 调整为 7，表情气泡和静态表情预览真机通过，群频道待验收 |
-| RELEASE-004 | 本地和 CI 的 Debug/Release 均强制使用固定生产证书签名 | `release/ci-and-updates.md` | implemented | Gradle `production` signingConfig、证书 SHA-256 配置期校验、`local-signing.properties.example`；CI 待验证，本机缺少生产私钥无法重建 |
+| RELEASE-004 | 本地和 CI 的 Debug/Release 均强制使用固定生产证书签名 | `release/ci-and-updates.md` | verified | Gradle `production` signingConfig、证书 SHA-256 配置期校验、`local-signing.properties.example`；Dev run `33506149344` 五包构建通过，独立下载 arm64 APK 的 v2 签名及固定生产证书摘要匹配 |
 | HOOK-010 | QQ 纵向滚动每进入一个新分组都将对应包入口强制居中 | `architecture/qq-panel.md` | implemented | `EmoRepoPanelDialog.centerPackTab`；生产签名 Debug 构建和真机验收待完成 |

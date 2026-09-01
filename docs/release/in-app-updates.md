@@ -52,4 +52,4 @@
 
 - 设置页已增加“软件更新”，当前本地 Debug 为 `0.4.0-dev / 4000`；仓库公开前曾使用 Keystore Token 真机读取 private `v0.4.0` 并显示“当前已是最新版本”。仓库现已改为 public，当前实现改为匿名请求且不再读取 Token；匿名真机回归待生产签名 Debug 构建后补齐。
 - JVM 测试覆盖 ABI 首选/回退、稳定 Release/索引/asset 一致性、版本码比较、摘要拒绝，以及匿名 asset 请求和跨主机 302 均不携带认证头，并完成大小/SHA-256 校验和 `.part` 清理。
-- Manifest、私有缓存 FileProvider、固定生产证书 BuildConfig、APK 包名/版本/签名校验、未知来源设置和系统安装 Intent 已实现。当前测试机仍是本地 Debug 签名，不能安全覆盖生产 APK；为保留私有仓库，本轮不卸载，因此真实下载新版本、未知来源授权和系统安装确认页仍待生产签名 Debug 环境验证。
+- Manifest、私有缓存 FileProvider、固定生产证书 BuildConfig、APK 包名/版本/签名校验、未知来源设置和系统安装 Intent 已实现。仓库公开后的匿名实现通过 production-signed Dev run `33506149344` 的编译和测试；当前测试机仍安装历史本地 Debug 签名，不能安全覆盖生产 APK，为保留私有仓库不卸载，因此 public 匿名真机检查、真实下载、未知来源授权和系统安装确认页仍待生产签名环境迁移后验证。
