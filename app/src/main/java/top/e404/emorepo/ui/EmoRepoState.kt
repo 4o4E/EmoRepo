@@ -94,7 +94,10 @@ class EmoRepoState(
         }.getOrDefault(PackLayout.LIST),
     )
         private set
-    private var repositoryReady by mutableStateOf(gitService.isValidRepository(repositoryDirectory))
+    // 主线程只做目录级初判，真正的 JGit 校验在 reload 的 IO 调度器中完成。
+    private var repositoryReady by mutableStateOf(
+        settings.setupComplete && File(repositoryDirectory, ".git").isDirectory,
+    )
     var busy by mutableStateOf(false)
         private set
     var message by mutableStateOf<String?>(null)
@@ -242,7 +245,7 @@ class EmoRepoState(
             busy = true
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    RepositoryLocks.forRoot(repositoryDirectory).withLock {
+                    RepositoryLocks.forMutation(repositoryDirectory).withLock {
                         val valid = updated.copy(
                             setupComplete = true,
                             remoteUrl = settings.remoteUrl,
@@ -573,7 +576,7 @@ class EmoRepoState(
             DiagnosticLogger.info("repository", "operation_started", fields = mapOf("operation" to operationName))
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    RepositoryLocks.forRoot(repositoryDirectory).withLock { repository.operation() }
+                    RepositoryLocks.forMutation(repositoryDirectory).withLock { repository.operation() }
                 }
             }
             message = result.fold(

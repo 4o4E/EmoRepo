@@ -1,6 +1,6 @@
 # 需求追踪
 
-- 更新：2026-09-01
+- 更新：2026-09-02
 
 状态含义见 [`README.md`](README.md)。代码列为空表示尚未实现。
 
@@ -80,3 +80,7 @@
 | HOOK-009 | EmoRepo 静态图和 GIF 均以 QQ 表情图片语义发送和预览 | `architecture/qq-panel.md` | verified | `QqMessageSender`、`QqMessageSenderTest`；“洛”中 PNG/GIF 均由原始 subtype 0 调整为 7，表情气泡和静态表情预览真机通过，群频道待验收 |
 | RELEASE-004 | 本地和 CI 的 Debug/Release 均强制使用固定生产证书签名 | `release/ci-and-updates.md` | verified | Gradle `production` signingConfig、证书 SHA-256 配置期校验、`local-signing.properties.example`；Dev run `33506149344` 五包构建通过，独立下载 arm64 APK 的 v2 签名及固定生产证书摘要匹配 |
 | HOOK-010 | QQ 纵向滚动每进入一个新分组都将对应包入口强制居中 | `architecture/qq-panel.md` | implemented | `EmoRepoPanelDialog.centerPackTab`；生产签名 Debug 构建和真机验收待完成 |
+| HOOK-011 | QQ“添加到 EmoRepo”将折叠目标稳定置于未折叠目标之后 | `architecture/qq-panel.md` | verified | `importTargetPacks`、`ImportTargetsTest`；“洛”中目标列表末尾“测试折叠”及取消无写入真机验收 |
+| IMAGE-003 | App 缩略图无损缓存不得造成偏色或透明边缘污染 | `management/emoticons.md` | verified | `FilteredThumbnail` v2 无损缓存；120 项 JVM 测试、透明 PNG 的 v1 白块与 v2 透明背景真机对比 |
+| RUNTIME-001 | 仓库对象构造不等待写入锁，首屏不得因同步本地阶段触发 ANR | `android/runtime.md` | verified | `EmoticonRepository.withContentLock`、并发构造测试；系统 ANR 栈根因及 CPH2609 保留 1.5 GiB 仓库冷启动回归 |
+| SYNC-007 | 所有 JGit 操作后台执行，Git 本地写入和失败不阻塞或破坏 App/QQ 读取 | `git/sync.md`、`android/runtime.md` | verified | `EmoRepoState` 后台校验、`RepositoryLocks` 写入代次、表情/最近使用有效快照；124 项 JVM 测试及 CPH2609 完整同步期间主页读取回归 |

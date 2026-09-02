@@ -401,6 +401,7 @@ class EmoticonRepositoryTest {
         RecentUsageRepository(root, "phone").renamePackageAcrossDevices("old", "new")
 
         val recovered = repository()
+        recovered.listPacks()
 
         assertEquals(listOf(PackIndexRecord("old", collapsed = true)), rootRecords())
         assertTrue(File(root, "old/${record.name}").isFile)
@@ -466,7 +467,7 @@ class EmoticonRepositoryTest {
         val lockAcquired = CountDownLatch(1)
         val releaseLock = CountDownLatch(1)
         val lockHolder = thread {
-            RepositoryLocks.forRoot(repositoryRoot).withLock {
+            RepositoryLocks.forMutation(repositoryRoot).withLock {
                 lockAcquired.countDown()
                 releaseLock.await(5, TimeUnit.SECONDS)
             }
@@ -483,6 +484,53 @@ class EmoticonRepositoryTest {
             executor.shutdownNow()
             lockHolder.join(1_000)
         }
+    }
+
+    @Test
+    fun repositoryConstructionDoesNotWaitForRepositoryMutationLock() {
+        createLegacyPack("cats")
+        val repositoryRoot = File(temporaryFolder.root, "repository")
+        val lockAcquired = CountDownLatch(1)
+        val releaseLock = CountDownLatch(1)
+        val lockHolder = thread {
+            RepositoryLocks.forMutation(repositoryRoot).withLock {
+                lockAcquired.countDown()
+                releaseLock.await(5, TimeUnit.SECONDS)
+            }
+        }
+        assertTrue(lockAcquired.await(1, TimeUnit.SECONDS))
+
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            executor.submit<EmoticonRepository> { EmoticonRepository(repositoryRoot) }
+                .get(1, TimeUnit.SECONDS)
+        } finally {
+            releaseLock.countDown()
+            executor.shutdownNow()
+            lockHolder.join(1_000)
+        }
+    }
+
+    @Test
+    fun repositoryReadsReturnLastValidSnapshotDuringFailedGitMutation() {
+        val repository = repository()
+        repository.createPack("cats")
+        assertEquals(listOf("cats"), repository.listPacks().map { it.name })
+        val rootIndex = File(temporaryFolder.root, "repository/index.jsonl")
+        val validContent = rootIndex.readText()
+
+        val failure = runCatching {
+            repository.withGitMutation {
+                rootIndex.writeText("{broken")
+                assertEquals(listOf("cats"), repository.listPacks().map { it.name })
+                error("模拟 Git 写入失败")
+            }
+        }
+
+        assertTrue(failure.isFailure)
+        assertEquals(listOf("cats"), repository.listPacks().map { it.name })
+        rootIndex.writeText(validContent)
+        assertEquals(listOf("cats"), repository.validateLivePacks().map { it.name })
     }
 
     private fun repository(): EmoticonRepository = EmoticonRepository(

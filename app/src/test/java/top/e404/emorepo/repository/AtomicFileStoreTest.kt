@@ -43,4 +43,16 @@ class AtomicFileStoreTest {
 
         assertEquals("old", target.readText())
     }
+
+    @Test
+    fun snapshotReadUsesCompleteBackupWithoutMutatingReplacementWindow() {
+        val target = File(temporaryFolder.root, "index.jsonl")
+        val staged = File(temporaryFolder.root, ".index.jsonl.emorepo-new").apply { writeText("new") }
+        val backup = File(temporaryFolder.root, ".index.jsonl.emorepo-backup").apply { writeText("old") }
+
+        assertEquals("old", AtomicFileStore.readSnapshotText(target))
+        assertFalse(target.exists())
+        assertEquals("new", staged.readText())
+        assertEquals("old", backup.readText())
+    }
 }

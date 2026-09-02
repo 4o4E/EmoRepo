@@ -3,6 +3,7 @@ package top.e404.emorepo.repository
 import java.io.File
 import java.io.IOException
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.withLock
 import top.e404.emorepo.protocol.ProtocolNames
 import top.e404.emorepo.protocol.recent.RecentCsvCodec
@@ -15,7 +16,7 @@ class RecentUsageRepository(
 ) {
     private val root = rootDirectory.canonicalFile
     private val recentDirectory = File(root, RECENT_DIRECTORY_NAME)
-    private val lock = RepositoryLocks.forRoot(root)
+    private val lock = RepositoryLocks.forMutation(root)
 
     init {
         validateDeviceId(deviceId)
@@ -24,19 +25,19 @@ class RecentUsageRepository(
         require(root.isDirectory) { "repository root is not a directory" }
     }
 
-    fun readCurrentDevice(): List<RecentUsageRecord> = lock.withLock {
-        readDeviceFile(deviceFile(deviceId))
-    }
+    fun readCurrentDevice(): List<RecentUsageRecord> = readRecentWithFallback(
+        cacheKey(deviceId),
+    ) { readDeviceFileSnapshot(deviceFile(deviceId)) }
 
-    fun readMerged(): List<RecentUsageRecord> = lock.withLock {
-        if (!recentDirectory.exists()) return@withLock emptyList()
+    fun readMerged(): List<RecentUsageRecord> = readRecentWithFallback(mergedCacheKey()) {
+        if (!recentDirectory.exists()) return@readRecentWithFallback emptyList()
         val records = recentDirectory.listFiles()
             .orEmpty()
             .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
             .sortedBy { it.name }
             .flatMap { file ->
                 validateDeviceId(file.nameWithoutExtension)
-                readDeviceFile(file)
+                readDeviceFileSnapshot(file)
             }
         RecentCsvCodec.merge(records)
     }
@@ -100,6 +101,7 @@ class RecentUsageRepository(
                 throw IOException("cannot delete old recent device file: ${oldFile.name}")
             }
         }
+        invalidateReadCaches()
         RecentUsageRepository(root, newDeviceId, maximumRecords)
     }
 
@@ -111,6 +113,7 @@ class RecentUsageRepository(
             }
             if (updated != current) writeDeviceFile(file, RecentCsvCodec.merge(updated))
         }
+        invalidateReadCaches()
     }
 
     fun removePackageAcrossDevices(packageName: String) = lock.withLock {
@@ -119,6 +122,7 @@ class RecentUsageRepository(
             val updated = current.filterNot { it.packageName == packageName }
             if (updated != current) writeDeviceFile(file, updated)
         }
+        invalidateReadCaches()
     }
 
     private fun recentFiles(): List<File> = recentDirectory.listFiles()
@@ -132,14 +136,41 @@ class RecentUsageRepository(
         return RecentCsvCodec.decode(AtomicFileStore.readText(file))
     }
 
+    private fun readDeviceFileSnapshot(file: File): List<RecentUsageRecord> {
+        if (!file.exists() && !File(file.parentFile, ".${file.name}.emorepo-backup").exists() &&
+            !File(file.parentFile, ".${file.name}.emorepo-new").exists()
+        ) {
+            return emptyList()
+        }
+        return RecentCsvCodec.decode(AtomicFileStore.readSnapshotText(file))
+    }
+
     private fun writeDeviceFile(file: File, records: Collection<RecentUsageRecord>) {
         recentDirectory.mkdirs()
         if (!recentDirectory.isDirectory) {
             throw IOException("cannot create recent directory")
         }
         AtomicFileStore.writeText(file, RecentCsvCodec.encode(records))
-        RecentCsvCodec.decode(AtomicFileStore.readText(file))
+        val verified = RecentCsvCodec.decode(AtomicFileStore.readText(file))
+        recentSnapshots[cacheKey(file.nameWithoutExtension)] = verified
+        recentSnapshots.remove(mergedCacheKey())
     }
+
+    private fun readRecentWithFallback(
+        key: String,
+        operation: () -> List<RecentUsageRecord>,
+    ): List<RecentUsageRecord> = runCatching(operation).onSuccess { recentSnapshots[key] = it }.getOrElse { error ->
+        recentSnapshots[key] ?: throw error
+    }
+
+    private fun invalidateReadCaches() {
+        val prefix = "${root.path}\u0000"
+        recentSnapshots.keys.removeIf { key -> key.startsWith(prefix) }
+    }
+
+    private fun cacheKey(id: String): String = "${root.path}\u0000device\u0000$id"
+
+    private fun mergedCacheKey(): String = "${root.path}\u0000merged"
 
     private fun applyMaintenanceLimit(records: List<RecentUsageRecord>): List<RecentUsageRecord> =
         if (maximumRecords == 0) records else records.take(maximumRecords)
@@ -147,6 +178,7 @@ class RecentUsageRepository(
     private fun deviceFile(id: String): File = File(recentDirectory, "$id.csv")
 
     companion object {
+        private val recentSnapshots = ConcurrentHashMap<String, List<RecentUsageRecord>>()
         const val DEFAULT_MAXIMUM_RECORDS = 30
         private const val RECENT_DIRECTORY_NAME = "recent"
         fun generateDeviceId(random: SecureRandom = SecureRandom()): String {

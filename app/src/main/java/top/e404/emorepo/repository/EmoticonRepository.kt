@@ -5,6 +5,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Properties
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.withLock
 import top.e404.emorepo.protocol.ProtocolException
 import top.e404.emorepo.protocol.ProtocolNames
@@ -18,29 +19,58 @@ class EmoticonRepository(
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val root = rootDirectory.canonicalFile
-    private val lock = RepositoryLocks.forRoot(root)
+    private val lock = RepositoryLocks.forMutation(root)
+    @Volatile
+    private var recoveryCompleted = false
 
     init {
         root.mkdirs()
         require(root.isDirectory) { "repository root is not a directory" }
-        lock.withLock { recoverPackTransaction() }
     }
 
-    fun listPacks(): List<EmoticonPack> = lock.withLock {
+    fun listPacks(): List<EmoticonPack> = readPacksWithFallback()
+
+    fun getPack(name: String): EmoticonPack {
+        val versionBefore = RepositoryLocks.mutationVersion(root)
+        if (versionBefore and 1L == 0L && hasPendingRecovery()) {
+            return recoverAndReadPacks().first { it.name == name }
+        }
+        if (versionBefore and 1L == 1L) {
+            cachedPacks()?.firstOrNull { it.name == name }?.let { return it }
+        }
+        val direct = runCatching { readPackDirect(name) }
+        val versionAfter = RepositoryLocks.mutationVersion(root)
+        if (versionBefore != versionAfter || versionAfter and 1L == 1L) {
+            cachedPacks()?.firstOrNull { it.name == name }?.let { return it }
+        }
+        return direct.onSuccess(::rememberPack).getOrElse { error ->
+            packSnapshots[root.path]
+                ?.takeIf(PackReadState::degraded)
+                ?.packs
+                ?.firstOrNull { it.name == name }
+                ?: throw error
+        }
+    }
+
+    internal fun validateLivePacks(): List<EmoticonPack> = readPacksDirect()
+
+    internal fun <T> withGitMutation(operation: () -> T): T = withContentLock(operation)
+
+    private fun readPacksDirect(): List<EmoticonPack> {
         val directories = packDirectories()
-        readPackIndex(directories).map { record ->
+        return readPackIndex(directories).map { record ->
             readPack(directories.first { it.name == record.name }, record.collapsed)
         }
     }
 
-    fun getPack(name: String): EmoticonPack = lock.withLock {
+    private fun readPackDirect(name: String): EmoticonPack {
         val directory = requirePackDirectory(name)
         val record = readPackIndex(packDirectories()).firstOrNull { it.name == name }
             ?: throw ProtocolException("root index.jsonl has no pack: $name")
-        readPack(directory, record.collapsed)
+        return readPack(directory, record.collapsed)
     }
 
-    fun initializePackOrder(): List<EmoticonPack> = lock.withLock {
+    fun initializePackOrder(): List<EmoticonPack> = withContentLock {
         val directories = packDirectories()
         val index = rootIndexFile()
         if (!index.exists()) {
@@ -51,7 +81,7 @@ class EmoticonRepository(
         }
     }
 
-    fun reorderPacks(names: List<String>): List<EmoticonPack> = lock.withLock {
+    fun reorderPacks(names: List<String>): List<EmoticonPack> = withContentLock {
         val directories = packDirectories()
         val currentNames = directories.map { it.name }
         if (names.size != currentNames.size || names.toSet() != currentNames.toSet()) {
@@ -65,7 +95,7 @@ class EmoticonRepository(
         }
     }
 
-    fun updatePackArrangement(records: List<PackIndexRecord>): List<EmoticonPack> = lock.withLock {
+    fun updatePackArrangement(records: List<PackIndexRecord>): List<EmoticonPack> = withContentLock {
         val directories = packDirectories()
         val currentNames = directories.map { it.name }
         if (records.size != currentNames.size || records.map { it.name }.toSet() != currentNames.toSet()) {
@@ -87,7 +117,7 @@ class EmoticonRepository(
         return file
     }
 
-    fun createPack(name: String): EmoticonPack = lock.withLock {
+    fun createPack(name: String): EmoticonPack = withContentLock {
         val directories = packDirectories()
         val currentIndex = readPackIndex(directories)
         val rootIndex = rootIndexFile()
@@ -114,10 +144,10 @@ class EmoticonRepository(
         }
     }
 
-    fun renamePack(oldName: String, newName: String): EmoticonPack = lock.withLock {
+    fun renamePack(oldName: String, newName: String): EmoticonPack = withContentLock {
         val source = requirePackDirectory(oldName)
         val target = resolvePackDirectory(newName)
-        if (source == target) return@withLock getPack(oldName)
+        if (source == target) return@withContentLock getPack(oldName)
         if (target.exists()) throw ProtocolException("emoticon pack already exists: $newName")
         val directories = packDirectories()
         val currentIndex = readPackIndex(directories)
@@ -140,7 +170,7 @@ class EmoticonRepository(
         }
     }
 
-    fun deletePack(name: String): EmoticonPack = lock.withLock {
+    fun deletePack(name: String): EmoticonPack = withContentLock {
         val source = requirePackDirectory(name)
         val directories = packDirectories()
         val currentIndex = readPackIndex(directories)
@@ -168,7 +198,7 @@ class EmoticonRepository(
         finalMd5Order: List<String>,
         recentDeviceId: String,
         recentMaximumRecords: Int,
-    ): EmoticonPack = lock.withLock {
+    ): EmoticonPack = withContentLock {
         val directory = requirePackDirectory(packName)
         val records = readRecords(directory)
         if (records.map { it.md5 } != originalMd5Order) {
@@ -205,14 +235,14 @@ class EmoticonRepository(
         }
     }
 
-    fun import(packName: String, candidates: List<ImportCandidate>): ManagementBatchResult = lock.withLock {
+    fun import(packName: String, candidates: List<ImportCandidate>): ManagementBatchResult = withContentLock {
         val directory = requirePackDirectory(packName)
         ManagementBatchResult(
             candidates.asReversed().map { candidate -> importOne(directory, candidate) }.asReversed(),
         )
     }
 
-    fun delete(packName: String, md5Values: List<String>): ManagementBatchResult = lock.withLock {
+    fun delete(packName: String, md5Values: List<String>): ManagementBatchResult = withContentLock {
         val directory = requirePackDirectory(packName)
         ManagementBatchResult(md5Values.map { md5 -> deleteOne(directory, md5) })
     }
@@ -221,9 +251,9 @@ class EmoticonRepository(
         sourcePackName: String,
         targetPackName: String,
         md5Values: List<String>,
-    ): ManagementBatchResult = lock.withLock {
+    ): ManagementBatchResult = withContentLock {
         if (sourcePackName == targetPackName) {
-            return@withLock ManagementBatchResult(
+            return@withContentLock ManagementBatchResult(
                 md5Values.map { md5 ->
                     ManagementItemResult(md5, ManagementStatus.FAILED, message = "source and target pack are the same")
                 },
@@ -236,7 +266,7 @@ class EmoticonRepository(
         )
     }
 
-    fun setIcon(packName: String, md5: String?): EmoticonPack = lock.withLock {
+    fun setIcon(packName: String, md5: String?): EmoticonPack = withContentLock {
         val directory = requirePackDirectory(packName)
         val records = readRecords(directory)
         if (md5 != null && records.none { it.md5 == md5 }) {
@@ -246,7 +276,7 @@ class EmoticonRepository(
         writeAndVerify(directory, updated)
     }
 
-    fun reorder(packName: String, md5Order: List<String>): EmoticonPack = lock.withLock {
+    fun reorder(packName: String, md5Order: List<String>): EmoticonPack = withContentLock {
         val directory = requirePackDirectory(packName)
         val records = readRecords(directory)
         if (md5Order.size != records.size || md5Order.toSet() != records.map { it.md5 }.toSet()) {
@@ -255,6 +285,78 @@ class EmoticonRepository(
         val byMd5 = records.associateBy { it.md5 }
         val updated = md5Order.map(byMd5::getValue)
         writeAndVerify(directory, updated)
+    }
+
+    /** 构造阶段保持无锁，首次实际仓库操作再在调用线程中完成中断恢复。 */
+    private inline fun <T> withContentLock(operation: () -> T): T = lock.withLock {
+        runCatching(::readPacksDirect).getOrNull()?.let(::rememberPacks)
+        RepositoryLocks.beginMutation(root)
+        try {
+            if (!recoveryCompleted) {
+                recoverPackTransaction()
+                recoveryCompleted = true
+            }
+            prepareIndexesForMutation()
+            operation().also {
+                rememberPacks(readPacksDirect())
+            }
+        } catch (error: Throwable) {
+            markReadSnapshotDegraded()
+            throw error
+        } finally {
+            RepositoryLocks.endMutation(root)
+        }
+    }
+
+    private fun readPacksWithFallback(): List<EmoticonPack> {
+        val versionBefore = RepositoryLocks.mutationVersion(root)
+        if (versionBefore and 1L == 0L && hasPendingRecovery()) {
+            return recoverAndReadPacks()
+        }
+        if (versionBefore and 1L == 1L) {
+            cachedPacks()?.let { return it }
+        }
+        val direct = runCatching(::readPacksDirect)
+        val versionAfter = RepositoryLocks.mutationVersion(root)
+        if (versionBefore != versionAfter || versionAfter and 1L == 1L) {
+            cachedPacks()?.let { return it }
+        }
+        return direct.onSuccess(::rememberPacks).getOrElse { error ->
+            packSnapshots[root.path]?.takeIf(PackReadState::degraded)?.packs ?: throw error
+        }
+    }
+
+    private fun recoverAndReadPacks(): List<EmoticonPack> = withContentLock { readPacksDirect() }
+
+    private fun rememberPacks(packs: List<EmoticonPack>) {
+        packSnapshots[root.path] = PackReadState(packs, degraded = false)
+    }
+
+    private fun rememberPack(pack: EmoticonPack) {
+        packSnapshots.computeIfPresent(root.path) { _, current ->
+            current.copy(
+                packs = current.packs.map { existing -> if (existing.name == pack.name) pack else existing },
+                degraded = false,
+            )
+        }
+    }
+
+    private fun cachedPacks(): List<EmoticonPack>? = packSnapshots[root.path]?.packs
+
+    private fun markReadSnapshotDegraded() {
+        packSnapshots.computeIfPresent(root.path) { _, current -> current.copy(degraded = true) }
+    }
+
+    private fun hasPendingRecovery(): Boolean {
+        if (transactionDirectory().exists() || File(root, TRANSACTION_PREPARING_DIRECTORY).exists() ||
+            completedTransactionDirectory().exists()
+        ) {
+            return true
+        }
+        if (AtomicFileStore.hasRecoveryArtifacts(rootIndexFile())) return true
+        return packDirectories().any { directory ->
+            AtomicFileStore.hasRecoveryArtifacts(File(directory, INDEX_FILE_NAME))
+        }
     }
 
     private fun importOne(directory: File, candidate: ImportCandidate): ManagementItemResult = try {
@@ -364,12 +466,10 @@ class EmoticonRepository(
 
     private fun readRecords(directory: File): List<EmoticonRecord> {
         val index = File(directory, INDEX_FILE_NAME)
-        AtomicFileStore.recover(index)
-        if (!index.exists()) {
+        val content = runCatching { AtomicFileStore.readSnapshotText(index) }.getOrElse {
             throw ProtocolException("emoticon pack has no $INDEX_FILE_NAME: ${directory.name}")
         }
-        LegacyOrderMigration.migratePack(index)
-        return IndexJsonlCodec.decode(AtomicFileStore.readText(index))
+        return IndexJsonlCodec.decode(content)
     }
 
     private fun writeRecords(directory: File, records: List<EmoticonRecord>) {
@@ -396,10 +496,9 @@ class EmoticonRepository(
 
     private fun readPackIndex(directories: List<File>): List<PackIndexRecord> {
         val index = rootIndexFile()
-        AtomicFileStore.recover(index)
-        if (!index.exists()) return temporaryPackIndex(directories)
-        LegacyOrderMigration.migrateRoot(index)
-        val records = RootIndexJsonlCodec.decode(AtomicFileStore.readText(index))
+        val content = runCatching { AtomicFileStore.readSnapshotText(index) }.getOrNull()
+            ?: return temporaryPackIndex(directories)
+        val records = RootIndexJsonlCodec.decode(content)
         val directoryNames = directories.map { it.name }.toSet()
         val recordNames = records.map { it.name }.toSet()
         if (recordNames != directoryNames) {
@@ -410,6 +509,19 @@ class EmoticonRepository(
             )
         }
         return records
+    }
+
+    /** 恢复和历史字段迁移只允许在写入锁内执行，普通读取不改动磁盘。 */
+    private fun prepareIndexesForMutation() {
+        val directories = packDirectories()
+        val rootIndex = rootIndexFile()
+        AtomicFileStore.recover(rootIndex)
+        if (rootIndex.isFile) LegacyOrderMigration.migrateRoot(rootIndex)
+        directories.forEach { directory ->
+            val index = File(directory, INDEX_FILE_NAME)
+            AtomicFileStore.recover(index)
+            if (index.isFile) LegacyOrderMigration.migratePack(index)
+        }
     }
 
     private fun temporaryPackIndex(directories: List<File>): List<PackIndexRecord> =
@@ -580,6 +692,7 @@ class EmoticonRepository(
     }
 
     private companion object {
+        val packSnapshots = ConcurrentHashMap<String, PackReadState>()
         const val INDEX_FILE_NAME = "index.jsonl"
         const val TRANSACTION_DIRECTORY = ".emorepo-pack-transaction"
         const val TRANSACTION_PREPARING_DIRECTORY = ".emorepo-pack-transaction.preparing"
@@ -595,6 +708,11 @@ class EmoticonRepository(
         const val TRANSACTION_PACK_DIRECTORY = "pack"
         const val TRANSACTION_DELETED_DIRECTORY = "deleted"
     }
+
+    private data class PackReadState(
+        val packs: List<EmoticonPack>,
+        val degraded: Boolean,
+    )
 
     private enum class PackTransactionOperation { RENAME, DELETE, EDIT }
 }

@@ -63,12 +63,12 @@ class JGitRepositoryService : GitRepositoryService {
         observer: GitSyncObserver,
     ): GitSyncResult {
         val root = repositoryDirectory.canonicalFile
-        val contentLock = RepositoryLocks.forRoot(root)
+        val contentRepository = EmoticonRepository(root)
         return RepositoryLocks.forSync(root).withLock {
             Git.open(root).use { git ->
                 val repository = git.repository
                 require(!repository.isBare) { "不支持 bare 仓库" }
-                var committed = contentLock.withLock {
+                var committed = contentRepository.withGitMutation {
                     if (repository.repositoryState.isRebasing) {
                         git.rebase().setOperation(RebaseCommand.Operation.ABORT).call()
                     }
@@ -83,7 +83,7 @@ class JGitRepositoryService : GitRepositoryService {
                 val warnings = mutableListOf<String>()
                 val provider = credentials(token)
 
-                // fetch 只修改 Git 对象和远端引用，不能用网络等待占住表情内容锁。
+                // fetch 只修改 Git 对象和远端引用，不能用网络等待占住仓库写入锁。
                 traced(observer, GitSyncStage.FETCH) {
                     val fetch = git.fetch().setRemote(DEFAULT_REMOTE)
                     provider?.let(fetch::setCredentialsProvider)
@@ -93,7 +93,7 @@ class JGitRepositoryService : GitRepositoryService {
                 val branch = repository.branch
                 val upstream = BranchConfig(repository.config, branch).trackingBranch
                     ?: "$REMOTE_PREFIX$branch"
-                contentLock.withLock {
+                contentRepository.withGitMutation {
                     // fetch 期间允许本地写入；rebase 前补提一次，避免带脏工作树进入 rebase。
                     committed = commitLocalChanges(git, settings, observer) || committed
                     traced(observer, GitSyncStage.REBASE, mapOf("branch" to branch)) {
@@ -109,7 +109,7 @@ class JGitRepositoryService : GitRepositoryService {
                     }
                     traced(observer, GitSyncStage.VALIDATE) {
                         // 根索引存在时必须与 rebase 后的实际表情包目录严格一致。
-                        EmoticonRepository(root).listPacks()
+                        contentRepository.validateLivePacks()
                     }
                 }
 

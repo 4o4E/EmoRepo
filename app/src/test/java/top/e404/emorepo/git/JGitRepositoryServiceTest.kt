@@ -17,6 +17,8 @@ import top.e404.emorepo.protocol.index.EmoticonRecord
 import top.e404.emorepo.protocol.index.IndexJsonlCodec
 import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.protocol.pack.RootIndexJsonlCodec
+import top.e404.emorepo.repository.EmoticonRepository
+import top.e404.emorepo.repository.RecentUsageRepository
 import top.e404.emorepo.repository.RepositoryLocks
 
 class JGitRepositoryServiceTest {
@@ -49,7 +51,7 @@ class JGitRepositoryServiceTest {
             val result = JGitRepositoryService().sync(local, settings(), token = null) { event ->
                 if (event.stage == GitSyncStage.FETCH && event.outcome == GitSyncStageOutcome.STARTED) {
                     val readable = lockProbe.submit(Callable {
-                        val lock = RepositoryLocks.forRoot(local)
+                        val lock = RepositoryLocks.forMutation(local)
                         if (!lock.tryLock(1, TimeUnit.SECONDS)) return@Callable false
                         try {
                             File(local, "during-fetch.txt").writeText("available")
@@ -58,7 +60,7 @@ class JGitRepositoryServiceTest {
                             lock.unlock()
                         }
                     }).get(2, TimeUnit.SECONDS)
-                    assertTrue("fetch 不应占用仓库内容锁", readable)
+                    assertTrue("fetch 不应占用仓库写入锁", readable)
                     wroteDuringFetch = true
                 }
             }
@@ -69,6 +71,34 @@ class JGitRepositoryServiceTest {
             assertEquals("available", File(verification, "during-fetch.txt").readText())
         } finally {
             lockProbe.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `local git stage does not block emoticon or recent reads`() {
+        val remote = createRemoteWithInitialCommit()
+        val local = clone(remote, "stage-non-blocking-read")
+        val emoticons = EmoticonRepository(local)
+        emoticons.createPack("cats")
+        val recent = RecentUsageRepository(local, "phone")
+        recent.recordUse("cats", "cat.png", 10)
+        val readExecutor = Executors.newSingleThreadExecutor()
+        var checkedDuringStage = false
+
+        try {
+            JGitRepositoryService().sync(local, settings(), token = null) { event ->
+                if (event.stage == GitSyncStage.STAGE && event.outcome == GitSyncStageOutcome.STARTED) {
+                    val readResult = readExecutor.submit(Callable {
+                        emoticons.listPacks().map { it.name } to recent.readMerged()
+                    }).get(1, TimeUnit.SECONDS)
+                    assertEquals(listOf("cats"), readResult.first)
+                    assertEquals(1, readResult.second.size)
+                    checkedDuringStage = true
+                }
+            }
+            assertTrue(checkedDuringStage)
+        } finally {
+            readExecutor.shutdownNow()
         }
     }
 

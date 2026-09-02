@@ -2,6 +2,9 @@ package top.e404.emorepo.repository
 
 import java.io.File
 import java.security.SecureRandom
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.withLock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -150,6 +153,24 @@ class RecentUsageRepositoryTest {
     @Test
     fun defaultMaximumRecordsIsThirty() {
         assertEquals(30, repository().maximumRecords)
+    }
+
+    @Test
+    fun recentReadsDoNotWaitForRepositoryMutationLock() {
+        val repository = repository()
+        repository.recordUse("cats", "a.png", 10)
+        val root = File(temporaryFolder.root, "repository")
+        val executor = Executors.newSingleThreadExecutor()
+
+        try {
+            RepositoryLocks.forMutation(root).withLock {
+                val records = executor.submit<List<RecentUsageRecord>> { repository.readCurrentDevice() }
+                    .get(1, TimeUnit.SECONDS)
+                assertEquals(listOf(RecentUsageRecord("cats", "a.png", 10)), records)
+            }
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     private fun repository(

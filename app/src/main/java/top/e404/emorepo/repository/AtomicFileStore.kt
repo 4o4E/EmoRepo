@@ -12,6 +12,19 @@ internal object AtomicFileStore {
 
     fun readText(target: File): String = readBytes(target).toString(Charsets.UTF_8)
 
+    /** 只读路径不参与恢复，按“正式文件→旧备份→已落盘新文件”取得完整字节。 */
+    fun readSnapshotBytes(target: File): ByteArray {
+        val source = sequenceOf(target, backupFile(target), stagedFile(target))
+            .firstOrNull(File::isFile)
+            ?: throw IOException("atomic file does not exist: ${target.name}")
+        return source.readBytes()
+    }
+
+    fun readSnapshotText(target: File): String = readSnapshotBytes(target).toString(Charsets.UTF_8)
+
+    fun hasRecoveryArtifacts(target: File): Boolean =
+        stagedFile(target).exists() || backupFile(target).exists()
+
     fun writeText(target: File, content: String) {
         writeBytes(target, content.toByteArray(Charsets.UTF_8))
     }
