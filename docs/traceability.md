@@ -84,3 +84,4 @@
 | IMAGE-003 | App 缩略图无损缓存不得造成偏色或透明边缘污染 | `management/emoticons.md` | verified | `FilteredThumbnail` v2 无损缓存；120 项 JVM 测试、透明 PNG 的 v1 白块与 v2 透明背景真机对比 |
 | RUNTIME-001 | 仓库对象构造不等待写入锁，首屏不得因同步本地阶段触发 ANR | `android/runtime.md` | verified | `EmoticonRepository.withContentLock`、并发构造测试；系统 ANR 栈根因及 CPH2609 保留 1.5 GiB 仓库冷启动回归 |
 | SYNC-007 | 所有 JGit 操作后台执行，Git 本地写入和失败不阻塞或破坏 App/QQ 读取 | `git/sync.md`、`android/runtime.md` | verified | `EmoRepoState` 后台校验、`RepositoryLocks` 写入代次、表情/最近使用有效快照；124 项 JVM 测试及 CPH2609 完整同步期间主页读取回归 |
+| IMAGE-004 | QQ 面板首帧和原图不得被有损缓存或宿主强制深色变换造成偏黄 | `architecture/qq-panel.md` | verified | `QqPanelFirstFrameCache` v2 无损缓存、`preserveImageColors`、`QqPanelPreviewEncodingTest`；125 项 JVM 测试及“洛”中修复前后截图回归 |

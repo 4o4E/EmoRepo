@@ -2,6 +2,7 @@
 
 package top.e404.emorepo.experiment.lsposed
 
+import android.annotation.TargetApi
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -58,7 +59,7 @@ internal object QqPanelFirstFrameCache {
             synchronized(keyLock) {
                 get(itemId)?.let { return@synchronized it }
                 val directory = File(cacheRoot, CACHE_DIRECTORY)
-                val diskFile = File(directory, "${safeDiskKey(itemId)}.webp")
+                val diskFile = File(directory, "${safeDiskKey(itemId)}.thumb")
                 readDisk(diskFile)?.let { bitmap -> return@synchronized remember(itemId, bitmap) }
                 val bitmap = decoder() ?: return@synchronized null
                 val remembered = remember(itemId, bitmap)
@@ -159,7 +160,7 @@ internal object QqPanelFirstFrameCache {
         val temporary = File(directory, ".${target.name}.${Thread.currentThread().id}.tmp")
         val written = runCatching {
             FileOutputStream(temporary).use { output ->
-                val (format, quality) = webpEncoding(bitmap)
+                val (format, quality) = losslessEncoding()
                 check(bitmap.compress(format, quality, output))
                 output.flush()
                 output.fd.sync()
@@ -209,11 +210,15 @@ internal object QqPanelFirstFrameCache {
     private fun safeDiskKey(itemId: String): String =
         if (itemId.matches(Regex("[a-zA-Z0-9_-]{1,80}"))) itemId else sha256(itemId)
 
-    private fun webpEncoding(bitmap: Bitmap): Pair<Bitmap.CompressFormat, Int> = when {
-        Build.VERSION.SDK_INT < 30 -> Bitmap.CompressFormat.WEBP to LEGACY_WEBP_QUALITY
-        bitmap.hasAlpha() -> Bitmap.CompressFormat.WEBP_LOSSLESS to LOSSLESS_WEBP_QUALITY
-        else -> Bitmap.CompressFormat.WEBP_LOSSY to LOSSY_WEBP_QUALITY
-    }
+    private fun losslessEncoding(): Pair<Bitmap.CompressFormat, Int> =
+        when (qqPanelPreviewEncoding(Build.VERSION.SDK_INT)) {
+            QqPanelPreviewEncoding.LOSSLESS_WEBP -> losslessWebpEncoding()
+            QqPanelPreviewEncoding.PNG -> Bitmap.CompressFormat.PNG to LOSSLESS_QUALITY
+        }
+
+    @TargetApi(30)
+    private fun losslessWebpEncoding(): Pair<Bitmap.CompressFormat, Int> =
+        Bitmap.CompressFormat.WEBP_LOSSLESS to LOSSLESS_QUALITY
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray())
@@ -226,12 +231,10 @@ internal object QqPanelFirstFrameCache {
         val length: Long,
     )
 
-    private const val CACHE_DIRECTORY = "emorepo-panel-first-frame-v1"
+    private const val CACHE_DIRECTORY = "emorepo-panel-first-frame-v2"
     private const val FIRST_FRAME_SIZE_PX = 128
     private const val MEMORY_MAXIMUM_BYTES = 24L * 1024L * 1024L
     private const val DISK_MAXIMUM_BYTES = 96L * 1024L * 1024L
     private const val DISK_TARGET_BYTES = 80L * 1024L * 1024L
-    private const val LEGACY_WEBP_QUALITY = 90
-    private const val LOSSY_WEBP_QUALITY = 82
-    private const val LOSSLESS_WEBP_QUALITY = 100
+    private const val LOSSLESS_QUALITY = 100
 }

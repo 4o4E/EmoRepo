@@ -76,7 +76,7 @@ internal class EmoRepoPanelDialog private constructor(
         ::canExpandDrawer,
         ::expandDrawer,
         ::finishDrawerDrag,
-    )
+    ).apply { preserveMediaColors() }
     private val sheetHost = FrameLayout(hostContext)
     private val packTabs = RecyclerView(hostContext)
     private val contentList = RecyclerView(hostContext)
@@ -84,7 +84,7 @@ internal class EmoRepoPanelDialog private constructor(
     private val globalProgress = ProgressBar(hostContext)
     private val previewOverlay = FrameLayout(hostContext)
     private val previewCard = FrameLayout(hostContext)
-    private val previewImage = ImageView(hostContext)
+    private val previewImage = ImageView(hostContext).apply { preserveImageColors() }
     private val previewProgress = ProgressBar(hostContext)
     private val destroyed = AtomicBoolean(false)
     private val sending = AtomicBoolean(false)
@@ -746,6 +746,7 @@ internal class EmoRepoPanelDialog private constructor(
         }
         addView(
             ImageView(hostContext).apply {
+                preserveImageColors()
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setBackgroundColor(Color.TRANSPARENT)
             },
@@ -826,6 +827,7 @@ internal class EmoRepoPanelDialog private constructor(
                 HeaderHolder(row)
             } else if (viewType == CONTENT_ITEM_TYPE) {
                 ItemHolder(ImageView(hostContext).apply {
+                    preserveImageColors()
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, cellSize())
                     setPadding(dp(1))
@@ -988,6 +990,7 @@ internal class EmoRepoPanelDialog private constructor(
 
         private fun bindItem(image: ImageView, item: PanelItem?, adapterPosition: Int) {
             releaseCell(image)
+            image.preserveImageColors()
             image.setImageDrawable(null)
             image.layoutParams = (image.layoutParams as RecyclerView.LayoutParams).apply { height = cellSize() }
             image.contentDescription = item?.fileName ?: "正在读取表情"
@@ -1414,6 +1417,16 @@ internal class EmoRepoPanelDialog private constructor(
     private fun cellSize(): Int =
         ((contentList.width.takeIf { it > 0 } ?: hostContext.resources.displayMetrics.widthPixels) -
             dp(2) * (panelColumns - 1)) / panelColumns
+
+    /** QQ 深色模式只能影响容器颜色，不能给仓库图片附加颜色变换。 */
+    private fun View.preserveMediaColors() {
+        if (Build.VERSION.SDK_INT >= 29) isForceDarkAllowed = false
+    }
+
+    private fun ImageView.preserveImageColors() {
+        preserveMediaColors()
+        clearColorFilter()
+    }
 
     private fun dp(value: Int): Int =
         (value * hostContext.resources.displayMetrics.density + 0.5f).toInt()
