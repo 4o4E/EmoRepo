@@ -398,25 +398,36 @@ class EmoRepoContentProvider : ContentProvider() {
         val recentlyAddedItems = selectRecentlyAddedItems(packs, recentItems) { item ->
             repository.imageFile(item.packId, item.record.name).isFile
         }
+        val recentCover = recentItems.firstOrNull()
         // 最近使用是面板虚拟包，不写入根索引，也不改变真实表情包排序。
         addRow(
             arrayOf<Any?>(
                 EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID,
                 EmoRepoIpcContract.VIRTUAL_RECENT_PACK_NAME,
-                recentItems.firstOrNull()?.record?.md5,
-                recentItems.firstOrNull()?.packId,
+                recentCover?.record?.md5,
+                recentCover?.packId,
+                recentCover?.let { item ->
+                    if (isAnimated(repository.imageFile(item.packId, item.record.name), item.record.ext)) 1 else 0
+                } ?: 0,
                 recentItems.size,
                 0,
                 0,
             ),
         )
         if (recentlyAddedItems.isNotEmpty()) {
+            val recentlyAddedCover = recentlyAddedItems.first()
             addRow(
                 arrayOf<Any?>(
                     EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_ID,
                     EmoRepoIpcContract.VIRTUAL_RECENTLY_ADDED_PACK_NAME,
-                    recentlyAddedItems.first().record.md5,
-                    recentlyAddedItems.first().packId,
+                    recentlyAddedCover.record.md5,
+                    recentlyAddedCover.packId,
+                    if (
+                        isAnimated(
+                            repository.imageFile(recentlyAddedCover.packId, recentlyAddedCover.record.name),
+                            recentlyAddedCover.record.ext,
+                        )
+                    ) 1 else 0,
                     recentlyAddedItems.size,
                     0,
                     0,
@@ -425,12 +436,16 @@ class EmoRepoContentProvider : ContentProvider() {
         }
         packs.forEach { pack ->
             val records = pack.records
+            val cover = records.firstOrNull { it.icon } ?: records.firstOrNull()
             addRow(
                 arrayOf<Any?>(
                     pack.name,
                     pack.name,
-                    records.firstOrNull { it.icon }?.md5 ?: records.firstOrNull()?.md5,
+                    cover?.md5,
                     pack.name,
+                    cover?.let { record ->
+                        if (isAnimated(repository.imageFile(pack.name, record.name), record.ext)) 1 else 0
+                    } ?: 0,
                     records.size,
                     1,
                     if (pack.collapsed) 1 else 0,
@@ -552,6 +567,7 @@ class EmoRepoContentProvider : ContentProvider() {
             EmoRepoIpcContract.COLUMN_DISPLAY_NAME,
             EmoRepoIpcContract.COLUMN_COVER_ITEM_ID,
             EmoRepoIpcContract.COLUMN_COVER_PACK_ID,
+            EmoRepoIpcContract.COLUMN_COVER_ANIMATED,
             EmoRepoIpcContract.COLUMN_ITEM_COUNT,
             EmoRepoIpcContract.COLUMN_WRITABLE,
             EmoRepoIpcContract.COLUMN_COLLAPSED,

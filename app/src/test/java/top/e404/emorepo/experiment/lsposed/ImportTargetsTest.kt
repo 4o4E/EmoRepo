@@ -31,6 +31,7 @@ class ImportTargetsTest {
         displayName = id,
         coverItemId = null,
         coverPackId = null,
+        coverAnimated = false,
         itemCount = 0,
         writable = writable,
         collapsed = collapsed,

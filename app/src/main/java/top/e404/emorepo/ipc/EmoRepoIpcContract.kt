@@ -58,6 +58,7 @@ object EmoRepoIpcContract {
     const val COLUMN_DISPLAY_NAME = "display_name"
     const val COLUMN_COVER_ITEM_ID = "cover_item_id"
     const val COLUMN_COVER_PACK_ID = "cover_pack_id"
+    const val COLUMN_COVER_ANIMATED = "cover_animated"
     const val COLUMN_ITEM_COUNT = "item_count"
     const val COLUMN_FILE_NAME = "file_name"
     const val COLUMN_MIME_TYPE = "mime_type"

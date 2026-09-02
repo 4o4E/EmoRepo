@@ -70,6 +70,7 @@ class PanelNavigationTest {
         displayName = id,
         coverItemId = null,
         coverPackId = null,
+        coverAnimated = false,
         itemCount = 1,
         writable = true,
         collapsed = collapsed,

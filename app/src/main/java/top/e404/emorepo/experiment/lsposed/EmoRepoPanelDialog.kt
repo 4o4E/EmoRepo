@@ -44,6 +44,7 @@ import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
 import coil3.request.Disposable
 import coil3.request.ImageRequest
+import coil3.size.Size
 import coil3.target.ImageViewTarget
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -502,7 +503,13 @@ internal class EmoRepoPanelDialog private constructor(
                             return@post
                         }
                         previewDisposable = LeaseDisposable(
-                            loadItemImage(previewImage, lease.file, item, PREVIEW_SIZE_PX),
+                            loadItemImage(
+                                target = previewImage,
+                                file = lease.file,
+                                item = item,
+                                size = PREVIEW_SIZE_PX,
+                                preserveAnimatedSourceSize = false,
+                            ),
                             lease,
                         )
                         previewProgress.visibility = View.GONE
@@ -579,12 +586,25 @@ internal class EmoRepoPanelDialog private constructor(
         mainHandler.post { Toast.makeText(hostContext, message, Toast.LENGTH_SHORT).show() }
     }
 
-    private fun loadItemImage(target: ImageView, file: File, item: PanelItem, size: Int): Disposable =
+    private fun loadItemImage(
+        target: ImageView,
+        file: File,
+        item: PanelItem,
+        size: Int,
+        preserveAnimatedSourceSize: Boolean,
+    ): Disposable =
         enqueueAnimated(
             target,
             ImageRequest.Builder(hostContext)
                 .data(file)
-                .size(size, size)
+                .apply {
+                    // 小网格的动画降采样会偏色；长按大图仍使用稳定的 1024 px 帧合成路径。
+                    if (item.animated && preserveAnimatedSourceSize) {
+                        size(Size.ORIGINAL)
+                    } else {
+                        size(size, size)
+                    }
+                }
                 .memoryCacheKey(itemMemoryCacheKey(item, size))
                 .memoryCachePolicy(if (item.animated) CachePolicy.DISABLED else CachePolicy.ENABLED)
                 .diskCachePolicy(CachePolicy.DISABLED)
@@ -601,7 +621,14 @@ internal class EmoRepoPanelDialog private constructor(
             target,
             ImageRequest.Builder(hostContext)
                 .data(QqPanelRepository.itemUri(coverPackId, itemId))
-                .size(dp(PACK_COVER_SIZE_DP), dp(PACK_COVER_SIZE_DP))
+                .apply {
+                    // 动态封面同样避免解码器降采样，静态封面仍只解码到显示尺寸。
+                    if (pack.coverAnimated) {
+                        size(Size.ORIGINAL)
+                    } else {
+                        size(dp(PACK_COVER_SIZE_DP), dp(PACK_COVER_SIZE_DP))
+                    }
+                }
                 .memoryCacheKey("qq-panel-cover:$revision:${pack.id}:$itemId")
                 .diskCachePolicy(CachePolicy.DISABLED)
                 .build(),
@@ -1070,7 +1097,13 @@ internal class EmoRepoPanelDialog private constructor(
                                     )
                                 }
                                 state.disposable = LeaseDisposable(
-                                    loadItemImage(image, lease.file, item, cellSize()),
+                                    loadItemImage(
+                                        target = image,
+                                        file = lease.file,
+                                        item = item,
+                                        size = cellSize(),
+                                        preserveAnimatedSourceSize = true,
+                                    ),
                                     lease,
                                 )
                             } else {
@@ -1538,8 +1571,11 @@ internal class EmoRepoPanelDialog private constructor(
                     MemoryCache.Builder().maxSizeBytes(IMAGE_MEMORY_CACHE_BYTES).build()
                 }
                 .components {
-                    if (Build.VERSION.SDK_INT >= 28) add(AnimatedImageDecoder.Factory())
-                    else add(GifDecoder.Factory())
+                    if (Build.VERSION.SDK_INT >= 28) {
+                        add(AnimatedImageDecoder.Factory(enforceMinimumFrameDelay = false))
+                    } else {
+                        add(GifDecoder.Factory(enforceMinimumFrameDelay = false))
+                    }
                 }
                 .build()
                 .also { sharedImageLoader = it }

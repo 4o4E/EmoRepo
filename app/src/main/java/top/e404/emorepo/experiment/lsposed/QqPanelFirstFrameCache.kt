@@ -6,6 +6,8 @@ import android.annotation.TargetApi
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorSpace
+import android.graphics.ImageDecoder
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.Os
@@ -40,13 +42,14 @@ internal object QqPanelFirstFrameCache {
     }
 
     /** 预加载只读取 Provider 原文件生成首帧，不把完整原图复制进 QQ 文件缓存。 */
-    fun preload(context: Context, item: PanelItem): Boolean =
-        load(context.cacheDir, item.id) {
-            context.contentResolver.openFileDescriptor(
-                QqPanelRepository.itemUri(item.packId, item.id),
-                "r",
-            )?.use(::decodeFirstFrame)
-        } != null
+    fun preload(context: Context, item: PanelItem): Boolean = load(context.cacheDir, item.id) {
+        val uri = QqPanelRepository.itemUri(item.packId, item.id)
+        if (Build.VERSION.SDK_INT >= 28) {
+            decodeFirstFrame(ImageDecoder.createSource(context.contentResolver, uri))
+        } else {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use(::decodeFirstFrameLegacy)
+        }
+    } != null
 
     private fun load(
         cacheRoot: File,
@@ -88,6 +91,13 @@ internal object QqPanelFirstFrameCache {
     }
 
     private fun decodeFirstFrame(source: File): Bitmap? {
+        if (Build.VERSION.SDK_INT >= 28) {
+            return decodeFirstFrame(ImageDecoder.createSource(source))
+        }
+        return decodeFirstFrameLegacy(source)
+    }
+
+    private fun decodeFirstFrameLegacy(source: File): Bitmap? {
         if (!source.isFile) return null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(source.path, bounds)
@@ -102,7 +112,7 @@ internal object QqPanelFirstFrameCache {
         return scaleFirstFrame(decoded)
     }
 
-    private fun decodeFirstFrame(descriptor: ParcelFileDescriptor): Bitmap? {
+    private fun decodeFirstFrameLegacy(descriptor: ParcelFileDescriptor): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFileDescriptor(descriptor.fileDescriptor, null, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -117,6 +127,23 @@ internal object QqPanelFirstFrameCache {
         ) ?: return null
         return scaleFirstFrame(decoded)
     }
+
+    /** 与平台动画 Drawable 使用同一解码器，并固定输出 sRGB，避免 GIF 调色板蓝通道丢失。 */
+    @TargetApi(28)
+    private fun decodeFirstFrame(source: ImageDecoder.Source): Bitmap? =
+        ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            val scale = minOf(
+                FIRST_FRAME_SIZE_PX.toFloat() / info.size.width,
+                FIRST_FRAME_SIZE_PX.toFloat() / info.size.height,
+                1f,
+            )
+            decoder.setTargetSize(
+                (info.size.width * scale).toInt().coerceAtLeast(1),
+                (info.size.height * scale).toInt().coerceAtLeast(1),
+            )
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+        }
 
     private fun sampleSize(width: Int, height: Int): Int {
         var sample = 1
@@ -231,7 +258,7 @@ internal object QqPanelFirstFrameCache {
         val length: Long,
     )
 
-    private const val CACHE_DIRECTORY = "emorepo-panel-first-frame-v2"
+    private const val CACHE_DIRECTORY = "emorepo-panel-first-frame-v3"
     private const val FIRST_FRAME_SIZE_PX = 128
     private const val MEMORY_MAXIMUM_BYTES = 24L * 1024L * 1024L
     private const val DISK_MAXIMUM_BYTES = 96L * 1024L * 1024L

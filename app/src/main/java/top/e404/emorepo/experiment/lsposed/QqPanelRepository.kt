@@ -39,6 +39,7 @@ internal object QqPanelRepository {
             val name = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_DISPLAY_NAME)
             val cover = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COVER_ITEM_ID)
             val coverPack = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COVER_PACK_ID)
+            val coverAnimated = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COVER_ANIMATED)
             val count = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_ITEM_COUNT)
             val writable = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_WRITABLE)
             val collapsed = cursor.getColumnIndexOrThrow(EmoRepoIpcContract.COLUMN_COLLAPSED)
@@ -50,6 +51,7 @@ internal object QqPanelRepository {
                             displayName = cursor.getString(name),
                             coverItemId = cursor.getString(cover),
                             coverPackId = cursor.getString(coverPack),
+                            coverAnimated = cursor.getInt(coverAnimated) != 0,
                             itemCount = cursor.getInt(count),
                             writable = cursor.getInt(writable) != 0,
                             collapsed = cursor.getInt(collapsed) != 0,
@@ -156,6 +158,7 @@ internal data class PanelPack(
     val displayName: String,
     val coverItemId: String?,
     val coverPackId: String?,
+    val coverAnimated: Boolean,
     val itemCount: Int,
     val writable: Boolean,
     val collapsed: Boolean,
