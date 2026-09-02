@@ -85,3 +85,6 @@
 | RUNTIME-001 | 仓库对象构造不等待写入锁，首屏不得因同步本地阶段触发 ANR | `android/runtime.md` | verified | `EmoticonRepository.withContentLock`、并发构造测试；系统 ANR 栈根因及 CPH2609 保留 1.5 GiB 仓库冷启动回归 |
 | SYNC-007 | 所有 JGit 操作后台执行，Git 本地写入和失败不阻塞或破坏 App/QQ 读取 | `git/sync.md`、`android/runtime.md` | verified | `EmoRepoState` 后台校验、`RepositoryLocks` 写入代次、表情/最近使用有效快照；124 项 JVM 测试及 CPH2609 完整同步期间主页读取回归 |
 | IMAGE-004 | QQ 面板首帧和原图不得被有损缓存或宿主强制深色变换造成偏黄 | `architecture/qq-panel.md` | verified | `QqPanelFirstFrameCache` v2 无损缓存、`preserveImageColors`、`QqPanelPreviewEncodingTest`；125 项 JVM 测试及“洛”中修复前后截图回归 |
+| GIT-002 | Android 新 clone 仅保留默认分支最近 5 个提交且不拉标签，远端历史不变 | `git/storage-maintenance.md` | implemented | `JGitRepositoryService.resolveRemoteDefaultBranch`、depth/no-tags clone；JVM bare 远端集成测试通过，Android 新 clone 待真机验收 |
+| STORE-004 | 同步成功后按空间阈值自动滚动浅边界并安全 GC，维护失败不影响读取 | `git/storage-maintenance.md`、`git/sync.md` | verified | `GitMaintenanceWorker`、JGit 文件 GC、空间阈值测试；CPH2609 失败保护、1.55 GiB→451 MiB、下一轮同步及 QQ 读取真机回归 |
+| UI-025 | 设置页显示仓库空间/历史模式并提供后台立即优化入口 | `git/storage-maintenance.md`、`ui/app.md` | verified | `SettingsScreen`、`EmoRepoState`、维护状态持久化；CPH2609 完整/浅历史、失败/成功状态和手动入口真机验收 |

@@ -32,6 +32,7 @@ import top.e404.emorepo.config.SettingsStore
 import top.e404.emorepo.protocol.pack.PackIndexRecord
 import top.e404.emorepo.config.SetupInput
 import top.e404.emorepo.config.SyncStatus
+import top.e404.emorepo.config.RepositoryMaintenanceStatus
 import top.e404.emorepo.config.validated
 import top.e404.emorepo.diagnostics.DiagnosticExporter
 import top.e404.emorepo.diagnostics.DiagnosticLogger
@@ -39,6 +40,8 @@ import top.e404.emorepo.diagnostics.DiagnosticSanitizer
 import top.e404.emorepo.git.GitRepositoryService
 import top.e404.emorepo.git.GitSyncExecutor
 import top.e404.emorepo.git.GitSyncScheduler
+import top.e404.emorepo.git.GitMaintenanceScheduler
+import top.e404.emorepo.git.RepositoryStorageStats
 import top.e404.emorepo.git.JGitRepositoryService
 import top.e404.emorepo.ipc.EmoRepoIpcContract
 import top.e404.emorepo.repository.EmoticonPack
@@ -88,6 +91,10 @@ class EmoRepoState(
         private set
     var syncStatus by mutableStateOf(settingsStore.loadSyncStatus())
         private set
+    var maintenanceStatus by mutableStateOf(settingsStore.loadMaintenanceStatus())
+        private set
+    var repositoryStorage by mutableStateOf<RepositoryStorageStats?>(null)
+        private set
     var packLayout by mutableStateOf(
         runCatching {
             PackLayout.valueOf(uiPreferences.getString("pack_layout", PackLayout.LIST.name).orEmpty())
@@ -134,6 +141,7 @@ class EmoRepoState(
             DiagnosticLogger.info("ui_state", "reload_started")
             settings = settingsStore.load()
             syncStatus = settingsStore.loadSyncStatus()
+            maintenanceStatus = settingsStore.loadMaintenanceStatus()
             repositoryReady = withContext(Dispatchers.IO) {
                 gitService.isValidRepository(repositoryDirectory)
             }
@@ -316,6 +324,8 @@ class EmoRepoState(
             syncStatus = settingsStore.loadSyncStatus()
             result.onSuccess { outcome ->
                 packs = withContext(Dispatchers.IO) { repository.listPacks() }
+                withContext(Dispatchers.IO) { GitMaintenanceScheduler.requestAutomaticIfNeeded(context) }
+                refreshRepositoryStatus()
                 message = if (outcome.warnings.isEmpty()) "同步完成" else {
                     "同步完成，${outcome.warnings.size} 条合并警告"
                 }
@@ -329,6 +339,24 @@ class EmoRepoState(
 
     fun refreshSyncStatus() {
         syncStatus = settingsStore.loadSyncStatus()
+        maintenanceStatus = settingsStore.loadMaintenanceStatus()
+    }
+
+    fun refreshRepositoryStatus() {
+        if (!repositoryConfigured) return
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { gitService.inspectStorage(repositoryDirectory) }
+            }
+            result.onSuccess { repositoryStorage = it }
+            maintenanceStatus = settingsStore.loadMaintenanceStatus()
+        }
+    }
+
+    fun optimizeRepository() {
+        GitMaintenanceScheduler.requestManual(context)
+        maintenanceStatus = settingsStore.loadMaintenanceStatus()
+        message = "已安排后台同步和仓库优化"
     }
 
     fun checkForUpdate() {

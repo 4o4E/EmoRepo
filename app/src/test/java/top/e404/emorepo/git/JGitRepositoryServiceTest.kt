@@ -4,6 +4,7 @@ import java.io.File
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.Random
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.PersonIdent
 import org.junit.Assert.assertEquals
@@ -189,6 +190,62 @@ class JGitRepositoryServiceTest {
         assertTrue(lock.exists())
     }
 
+    @Test
+    fun `clone keeps only five default branch commits without tags`() {
+        val remote = createRemoteWithHistory(12)
+        val target = File(temporaryFolder.root, "shallow-clone")
+        val service = JGitRepositoryService(remoteValidator = {})
+
+        service.cloneRepository(remote.toURI().toString(), token = null, target)
+
+        Git.open(target).use { git ->
+            assertEquals(LOCAL_HISTORY_DEPTH, git.log().call().count())
+            assertTrue(File(target, ".git/shallow").isFile)
+            assertTrue(git.tagList().call().isEmpty())
+            val fetch = git.repository.config.getStringList("remote", "origin", "fetch")
+            assertEquals(1, fetch.size)
+            assertFalse(fetch.single().contains("*"))
+        }
+    }
+
+    @Test
+    fun `maintenance shrinks local history while remote stays complete and next sync works`() {
+        val remote = createRemoteWithHistory(12)
+        val local = clone(remote, "maintenance-local")
+        val service = JGitRepositoryService(remoteValidator = {})
+        val beforeRemoteCount = Git.open(remote).use { it.log().all().call().count() }
+        val currentBytes = File(local, "history.bin").readBytes()
+
+        val result = service.optimizeLocalHistory(local, token = null)
+
+        assertTrue(result.optimized)
+        assertTrue(result.after.shallow)
+        assertTrue(
+            "维护前 ${result.before.gitBytes}，维护后 ${result.after.gitBytes}",
+            result.after.gitBytes < result.before.gitBytes,
+        )
+        assertEquals(currentBytes.toList(), File(local, "history.bin").readBytes().toList())
+        Git.open(local).use { git ->
+            assertEquals(LOCAL_HISTORY_DEPTH, git.log().call().count())
+            assertTrue(git.tagList().call().isEmpty())
+        }
+        val afterRemoteCount = Git.open(remote).use { it.log().all().call().count() }
+        assertEquals(beforeRemoteCount, afterRemoteCount)
+        assertTrue(Git.open(remote).use { it.tagList().call().isNotEmpty() })
+        assertFalse(service.optimizeLocalHistory(local, token = null).optimized)
+
+        val other = clone(remote, "maintenance-other")
+        File(other, "remote-after.txt").writeText("remote")
+        commitAndPush(other, "remote after maintenance")
+        File(local, "local-after.txt").writeText("local")
+
+        service.sync(local, settings(), token = null)
+
+        val verification = clone(remote, "maintenance-verification")
+        assertEquals("remote", File(verification, "remote-after.txt").readText())
+        assertEquals("local", File(verification, "local-after.txt").readText())
+    }
+
     private fun createRemoteWithInitialCommit(
         prepare: (File) -> Unit = { root -> File(root, "initial.txt").writeText("initial") },
     ): File {
@@ -204,6 +261,35 @@ class JGitRepositoryServiceTest {
             .setURI(seed.toURI().toString())
             .setDirectory(remote)
             .setBare(true)
+            .call()
+            .close()
+        return remote
+    }
+
+    private fun createRemoteWithHistory(commitCount: Int): File {
+        val seed = temporaryFolder.newFolder("history-seed")
+        Git.init().setDirectory(seed).call().use { git ->
+            createEmptyPack(seed, "pack")
+            File(seed, "index.jsonl").writeText(RootIndexJsonlCodec.encode(listOf(PackIndexRecord("pack"))))
+            val identity = PersonIdent("Test", "test@example.com")
+            repeat(commitCount) { commit ->
+                val random = Random(commit.toLong())
+                File(seed, "history.bin").writeBytes(ByteArray(128 * 1024).also(random::nextBytes))
+                git.add().addFilepattern(".").call()
+                val committed = git.commit()
+                    .setMessage("history-$commit")
+                    .setAuthor(identity)
+                    .setCommitter(identity)
+                    .call()
+                if (commit == 3) git.tag().setName("old-history").setObjectId(committed).call()
+            }
+        }
+        val remote = File(temporaryFolder.root, "history-remote.git")
+        Git.cloneRepository()
+            .setURI(seed.toURI().toString())
+            .setDirectory(remote)
+            .setBare(true)
+            .setCloneAllBranches(true)
             .call()
             .close()
         return remote

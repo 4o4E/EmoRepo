@@ -60,6 +60,7 @@
 - rebase 失败不得用 force push 或 reset 覆盖任一侧。
 - push 失败保留本地提交，由下次同步重试。
 - 同步失败或网络请求长期等待不能阻塞本地表情读取；状态和错误交给 App 展示，最近一次有效读缓存继续可用。fetch 期间发生的新本地修改必须在 rebase 前再次提交，避免带脏工作树进入 rebase；push 期间的新修改留给已调度的下一次同步。
+- 普通同步不得在主流水线中直接执行耗时 GC。同步成功后按 [`storage-maintenance.md`](storage-maintenance.md) 统计并调度独立维护 Worker；维护 Worker 会再次同步并重新确认本地/远端一致，不能复用过期的成功结论。
 - Git 作者名和邮箱由用户按仓库配置；缺失时禁止创建提交，但允许拉取更新。
 - 默认提交信息为 `Update local emoticons`，允许用户配置。
 

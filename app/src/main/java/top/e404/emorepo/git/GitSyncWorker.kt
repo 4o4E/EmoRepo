@@ -25,6 +25,7 @@ class GitSyncWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
             GitSyncExecutor(applicationContext).run(runAttemptCount)
+            GitMaintenanceScheduler.requestAutomaticIfNeeded(applicationContext)
             Result.success()
         } catch (error: CancellationException) {
             throw error

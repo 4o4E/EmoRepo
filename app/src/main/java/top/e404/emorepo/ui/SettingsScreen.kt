@@ -33,7 +33,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import top.e404.emorepo.config.SyncPhase
+import top.e404.emorepo.config.MaintenancePhase
 import top.e404.emorepo.BuildConfig
 import top.e404.emorepo.update.AppUpdatePhase
 
@@ -63,10 +65,20 @@ fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
         state.resumeUpdateInstall(context)
     }
 
-    LaunchedEffect(Unit) { state.refreshSyncStatus() }
+    LaunchedEffect(Unit) {
+        state.refreshSyncStatus()
+        state.refreshRepositoryStatus()
+    }
     LaunchedEffect(state.updateState.phase) {
         if (state.updateState.phase == AppUpdatePhase.READY_TO_INSTALL) {
             state.requestUpdateInstall(context, installPermissionLauncher::launch)
+        }
+    }
+    LaunchedEffect(state.maintenanceStatus.phase) {
+        while (state.maintenanceStatus.phase in setOf(MaintenancePhase.QUEUED, MaintenancePhase.RUNNING)) {
+            delay(1_000)
+            state.refreshSyncStatus()
+            state.refreshRepositoryStatus()
         }
     }
 
@@ -122,7 +134,32 @@ fun SettingsScreen(state: EmoRepoState, onBack: () -> Unit) {
                     Text("最近成功：${DateFormat.getDateTimeInstance().format(Date(time))}")
                 }
                 state.syncStatus.lastError?.let { Text("最近错误：$it", color = MaterialTheme.colorScheme.error) }
-                Button(onClick = state::syncNow, enabled = !state.busy) { Text("立即同步") }
+                state.repositoryStorage?.let { storage ->
+                    Text(
+                        "工作区 ${formatBytes(storage.worktreeBytes)} · Git ${formatBytes(storage.gitBytes)} · " +
+                            if (storage.shallow) "浅历史" else "完整历史",
+                    )
+                }
+                Text(maintenanceStatusText(state), style = MaterialTheme.typography.bodyMedium)
+                state.maintenanceStatus.lastRunTime?.let { time ->
+                    Text("最近优化：${DateFormat.getDateTimeInstance().format(Date(time))}")
+                }
+                val beforeBytes = state.maintenanceStatus.beforeBytes
+                val afterBytes = state.maintenanceStatus.afterBytes
+                if (beforeBytes != null && afterBytes != null) {
+                    Text("空间变化：${formatBytes(beforeBytes)} → ${formatBytes(afterBytes)}")
+                }
+                state.maintenanceStatus.message?.let { Text(it) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = state::syncNow, enabled = !state.busy) { Text("立即同步") }
+                    OutlinedButton(
+                        onClick = state::optimizeRepository,
+                        enabled = !state.busy && state.maintenanceStatus.phase !in setOf(
+                            MaintenancePhase.QUEUED,
+                            MaintenancePhase.RUNNING,
+                        ),
+                    ) { Text("立即优化仓库") }
+                }
             }
         }
         item {
@@ -268,4 +305,20 @@ private fun syncStatusText(state: EmoRepoState): String = when (state.syncStatus
     SyncPhase.RUNNING -> "正在同步"
     SyncPhase.SUCCESS -> "同步正常"
     SyncPhase.ERROR -> "同步失败"
+}
+
+private fun maintenanceStatusText(state: EmoRepoState): String = when (state.maintenanceStatus.phase) {
+    MaintenancePhase.IDLE -> "仓库尚未执行空间优化"
+    MaintenancePhase.QUEUED -> "仓库优化已排队"
+    MaintenancePhase.RUNNING -> "正在后台优化仓库"
+    MaintenancePhase.SUCCESS -> "最近仓库优化成功"
+    MaintenancePhase.SKIPPED -> "最近仓库优化无需执行"
+    MaintenancePhase.ERROR -> "最近仓库优化失败"
+}
+
+private fun formatBytes(bytes: Long): String {
+    val gib = 1024.0 * 1024.0 * 1024.0
+    val mib = 1024.0 * 1024.0
+    return if (bytes >= gib) String.format(Locale.US, "%.2f GiB", bytes / gib)
+    else String.format(Locale.US, "%.1f MiB", bytes / mib)
 }

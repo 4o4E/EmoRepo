@@ -17,6 +17,23 @@ data class SyncStatus(
     val lastError: String? = null,
 )
 
+enum class MaintenancePhase {
+    IDLE,
+    QUEUED,
+    RUNNING,
+    SUCCESS,
+    SKIPPED,
+    ERROR,
+}
+
+data class RepositoryMaintenanceStatus(
+    val phase: MaintenancePhase = MaintenancePhase.IDLE,
+    val lastRunTime: Long? = null,
+    val beforeBytes: Long? = null,
+    val afterBytes: Long? = null,
+    val message: String? = null,
+)
+
 class SettingsStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
@@ -83,6 +100,32 @@ class SettingsStore(context: Context) {
         }
     }
 
+    fun loadMaintenanceStatus(): RepositoryMaintenanceStatus = RepositoryMaintenanceStatus(
+        phase = runCatching {
+            MaintenancePhase.valueOf(
+                preferences.getString(KEY_MAINTENANCE_PHASE, MaintenancePhase.IDLE.name).orEmpty(),
+            )
+        }.getOrDefault(MaintenancePhase.IDLE),
+        lastRunTime = preferences.getLong(KEY_MAINTENANCE_TIME, 0L).takeIf { it > 0L },
+        beforeBytes = preferences.getLong(KEY_MAINTENANCE_BEFORE_BYTES, -1L).takeIf { it >= 0L },
+        afterBytes = preferences.getLong(KEY_MAINTENANCE_AFTER_BYTES, -1L).takeIf { it >= 0L },
+        message = preferences.getString(KEY_MAINTENANCE_MESSAGE, null),
+    )
+
+    fun saveMaintenanceStatus(status: RepositoryMaintenanceStatus) {
+        preferences.edit(commit = true) {
+            putString(KEY_MAINTENANCE_PHASE, status.phase.name)
+            if (status.lastRunTime == null) remove(KEY_MAINTENANCE_TIME)
+            else putLong(KEY_MAINTENANCE_TIME, status.lastRunTime)
+            if (status.beforeBytes == null) remove(KEY_MAINTENANCE_BEFORE_BYTES)
+            else putLong(KEY_MAINTENANCE_BEFORE_BYTES, status.beforeBytes)
+            if (status.afterBytes == null) remove(KEY_MAINTENANCE_AFTER_BYTES)
+            else putLong(KEY_MAINTENANCE_AFTER_BYTES, status.afterBytes)
+            if (status.message == null) remove(KEY_MAINTENANCE_MESSAGE)
+            else putString(KEY_MAINTENANCE_MESSAGE, status.message)
+        }
+    }
+
     companion object {
         private const val PREFERENCES_NAME = "emorepo_settings"
         private const val KEY_SETUP_COMPLETE = "setup_complete"
@@ -98,5 +141,10 @@ class SettingsStore(context: Context) {
         private const val KEY_SYNC_PHASE = "sync_phase"
         private const val KEY_LAST_SUCCESS_TIME = "last_success_time"
         private const val KEY_LAST_ERROR = "last_error"
+        private const val KEY_MAINTENANCE_PHASE = "maintenance_phase"
+        private const val KEY_MAINTENANCE_TIME = "maintenance_time"
+        private const val KEY_MAINTENANCE_BEFORE_BYTES = "maintenance_before_bytes"
+        private const val KEY_MAINTENANCE_AFTER_BYTES = "maintenance_after_bytes"
+        private const val KEY_MAINTENANCE_MESSAGE = "maintenance_message"
     }
 }

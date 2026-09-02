@@ -8,6 +8,13 @@ data class GitSyncResult(
     val warnings: List<String>,
 )
 
+data class GitMaintenanceResult(
+    val optimized: Boolean,
+    val before: RepositoryStorageStats,
+    val after: RepositoryStorageStats,
+    val message: String,
+)
+
 enum class GitSyncStage(val displayName: String) {
     PRECHECK("仓库预检"),
     STATUS("检查本地变更"),
@@ -48,4 +55,11 @@ interface GitRepositoryService {
         token: String?,
         observer: GitSyncObserver = GitSyncObserver.NONE,
     ): GitSyncResult
+
+    fun inspectStorage(repositoryDirectory: File): RepositoryStorageStats
+
+    fun optimizeLocalHistory(
+        repositoryDirectory: File,
+        token: String?,
+    ): GitMaintenanceResult
 }
