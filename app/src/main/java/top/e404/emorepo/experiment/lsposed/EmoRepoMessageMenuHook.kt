@@ -336,6 +336,82 @@ internal object EmoRepoMessageMenuHook {
         }
     }
 
+    fun startPreviewImport(context: Context, previewOwner: Any) {
+        worker.execute {
+            runCatching {
+                val picture = extractCurrentPreviewPicture(previewOwner)
+                listPacks(context) to listOf(picture)
+            }.onSuccess { (packs, pictures) ->
+                mainHandler.post { showPackChooser(context, packs, pictures) }
+            }.onFailure { error ->
+                log("准备 QQ 大图预览导入失败", error)
+                showToast(context, error.message ?: "准备导入失败")
+            }
+        }
+    }
+
+    fun startResolvedPreviewImport(context: Context, file: File) {
+        worker.execute {
+            runCatching { listPacks(context) }.onSuccess { packs ->
+                mainHandler.post {
+                    val chooser = EmoRepoImportDialog.show(context, packs, 1) { packId ->
+                        importResolvedPictures(
+                            context,
+                            packId,
+                            listOf(file.name.ifBlank { "qq-preview.bin" } to file),
+                        )
+                    }
+                    chooser.updatePreview(file)
+                }
+            }.onFailure { error ->
+                log("准备 QQ 大图文件导入失败", error)
+                showToast(context, error.message ?: "准备导入失败")
+            }
+        }
+    }
+
+    private fun extractCurrentPreviewPicture(previewOwner: Any): PictureRef {
+        val previewContext = if (previewOwner.javaClass.name == "com.tencent.qqnt.aio.gallery.share.s") {
+            previewOwner
+        } else {
+            previewOwner.javaClass.declaredMethods.firstOrNull { method ->
+                method.parameterTypes.isEmpty() &&
+                    method.returnType.name == "com.tencent.qqnt.aio.gallery.share.s"
+            }?.apply { isAccessible = true }?.invoke(previewOwner)
+                ?: error("QQ 大图预览缺少当前图片上下文")
+        }
+        val fields = generateSequence(previewContext.javaClass) { current -> current.superclass }
+            .flatMap { current -> current.declaredFields.asSequence() }
+            .filterNot { field -> Modifier.isStatic(field.modifiers) }
+            .onEach { field -> field.isAccessible = true }
+            .toList()
+        val element = fields.firstOrNull { field ->
+            field.type.name == "com.tencent.qqnt.kernel.nativeinterface.MsgElement"
+        }?.get(previewContext) ?: error("QQ 大图预览缺少当前图片元素")
+        val picture = element.javaClass.getMethod("getPicElement").invoke(element)
+            ?: error("QQ 当前预览项不是图片")
+        val mediaInfo = fields.firstOrNull { field ->
+            field.type.name == "com.tencent.richframework.gallery.bean.RFWLayerItemMediaInfo"
+        }?.get(previewContext)
+        val message = mediaInfo?.javaClass?.methods?.firstOrNull { method ->
+            method.name == "getExtraData" && method.parameterTypes.isEmpty()
+        }?.invoke(mediaInfo)?.takeIf { value ->
+            value.javaClass.name == AIO_MESSAGE_CLASS ||
+                generateSequence(value.javaClass) { current -> current.superclass }
+                    .any { current -> current.name == AIO_MESSAGE_CLASS }
+        }
+        val fallback = mediaInfo?.javaClass?.methods?.firstOrNull { method ->
+            method.name == "getExistSaveOrEditPath" &&
+                method.parameterTypes.isEmpty() && method.returnType == String::class.java
+        }?.invoke(mediaInfo) as? String
+        return PictureRef(
+            message = message,
+            element = element,
+            picture = picture,
+            fallbackFile = fallback?.takeIf(String::isNotBlank)?.let(::File)?.takeIf(File::isFile),
+        )
+    }
+
     private fun listPacks(context: Context): List<PanelPack> {
         return importTargetPacks(QqPanelRepository.listPacks(context))
             .also { packs -> check(packs.isNotEmpty()) { "EmoRepo 没有可导入的表情包" } }
@@ -362,44 +438,67 @@ internal object EmoRepoMessageMenuHook {
                     val sourceName = md5?.let { "$it.bin" } ?: source.name.ifBlank { "qq-image-$index" }
                     sourceName to source
                 }
-                val descriptors = sources.map { (_, source) ->
-                    ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
-                }
-                try {
-                    val result = context.contentResolver.call(
-                        EmoRepoIpcContract.BASE_URI,
-                        EmoRepoIpcContract.METHOD_IMPORT_ITEMS,
-                        null,
-                        Bundle().apply {
-                            putString(EmoRepoIpcContract.EXTRA_PACK_ID, packId)
-                            putStringArrayList(
-                                EmoRepoIpcContract.EXTRA_SOURCE_NAMES,
-                                ArrayList(sources.map { it.first }),
-                            )
-                            putParcelableArrayList(
-                                EmoRepoIpcContract.EXTRA_SOURCE_DESCRIPTORS,
-                                ArrayList(descriptors),
-                            )
-                        },
-                    )
-                    requireNotNull(result) { "EmoRepo 未返回导入结果" }
-                    ImportFeedback(
-                        succeeded = result.getInt(EmoRepoIpcContract.RESULT_SUCCESS_COUNT),
-                        duplicates = result.getInt(EmoRepoIpcContract.RESULT_DUPLICATE_COUNT),
-                        failed = result.getInt(EmoRepoIpcContract.RESULT_FAILED_COUNT),
-                    )
-                } finally {
-                    descriptors.forEach { descriptor -> runCatching { descriptor.close() } }
-                }
+                performImport(context, packId, sources)
             }.onSuccess { feedback ->
-                val text = "导入完成：新增 ${feedback.succeeded}，重复 ${feedback.duplicates}，失败 ${feedback.failed}"
-                log("EmoRepo 批量导入结果：$text")
-                showToast(context, text)
+                showImportFeedback(context, feedback)
             }.onFailure { error ->
                 log("导入 EmoRepo 失败", error)
                 showToast(context, error.message ?: "添加失败")
             }
         }
+    }
+
+    private fun importResolvedPictures(context: Context, packId: String, sources: List<Pair<String, File>>) {
+        worker.execute {
+            runCatching { performImport(context, packId, sources) }
+                .onSuccess { feedback -> showImportFeedback(context, feedback) }
+                .onFailure { error ->
+                    log("导入 EmoRepo 失败", error)
+                    showToast(context, error.message ?: "添加失败")
+                }
+        }
+    }
+
+    private fun performImport(
+        context: Context,
+        packId: String,
+        sources: List<Pair<String, File>>,
+    ): ImportFeedback {
+        val descriptors = sources.map { (_, source) ->
+            ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
+        }
+        try {
+            val result = context.contentResolver.call(
+                EmoRepoIpcContract.BASE_URI,
+                EmoRepoIpcContract.METHOD_IMPORT_ITEMS,
+                null,
+                Bundle().apply {
+                    putString(EmoRepoIpcContract.EXTRA_PACK_ID, packId)
+                    putStringArrayList(
+                        EmoRepoIpcContract.EXTRA_SOURCE_NAMES,
+                        ArrayList(sources.map { it.first }),
+                    )
+                    putParcelableArrayList(
+                        EmoRepoIpcContract.EXTRA_SOURCE_DESCRIPTORS,
+                        ArrayList(descriptors),
+                    )
+                },
+            )
+            requireNotNull(result) { "EmoRepo 未返回导入结果" }
+            return ImportFeedback(
+                succeeded = result.getInt(EmoRepoIpcContract.RESULT_SUCCESS_COUNT),
+                duplicates = result.getInt(EmoRepoIpcContract.RESULT_DUPLICATE_COUNT),
+                failed = result.getInt(EmoRepoIpcContract.RESULT_FAILED_COUNT),
+            )
+        } finally {
+            descriptors.forEach { descriptor -> runCatching { descriptor.close() } }
+        }
+    }
+
+    private fun showImportFeedback(context: Context, feedback: ImportFeedback) {
+        val text = "导入完成：新增 ${feedback.succeeded}，重复 ${feedback.duplicates}，失败 ${feedback.failed}"
+        log("EmoRepo 批量导入结果：$text")
+        showToast(context, text)
     }
 
     private fun extractPictureElements(message: Any): List<PictureRef> {
@@ -411,7 +510,7 @@ internal object EmoRepoMessageMenuHook {
             if (element == null) return@mapNotNull null
             runCatching { element.javaClass.getMethod("getPicElement").invoke(element) }
                 .getOrNull()
-                ?.let { picture -> PictureRef(message, element, picture) }
+                ?.let { picture -> PictureRef(message, element, picture, null) }
         }
     }
 
@@ -420,7 +519,7 @@ internal object EmoRepoMessageMenuHook {
             log("使用 QQ 消息缓存：type=$size size=${file.length()}")
             return file
         }
-        findExistingMessagePath(reference.message)?.let { (method, file) ->
+        reference.message?.let(::findExistingMessagePath)?.let { (method, file) ->
             log("使用 QQ 消息预下载路径：method=$method size=${file.length()}")
             return file
         }
@@ -457,20 +556,32 @@ internal object EmoRepoMessageMenuHook {
         }
 
         val md5 = invokeString(picture, "getMd5HexStr")?.uppercase()
-        val rawUrl = invokeString(picture, "getOriginImageUrl")
-        val url = when {
-            rawUrl?.startsWith("http") == true -> rawUrl
-            rawUrl?.startsWith("/") == true && !rawUrl.startsWith("/download") ->
-                "https://gchat.qpic.cn$rawUrl"
-            rawUrl?.startsWith("/download") == true -> {
-                val group = rawUrl.contains("appid=1406")
-                val rkey = QqRkeyStore.downloadRkey(group)
-                    ?: error("QQ 富媒体 rkey 尚未取得，请稍后重试")
-                "https://multimedia.nt.qq.com$rawUrl$rkey"
+        val remoteResult = runCatching {
+            val rawUrl = invokeString(picture, "getOriginImageUrl")
+            val url = when {
+                rawUrl?.startsWith("http") == true -> rawUrl
+                rawUrl?.startsWith("/") == true && !rawUrl.startsWith("/download") ->
+                    "https://gchat.qpic.cn$rawUrl"
+                rawUrl?.startsWith("/download") == true -> {
+                    val group = rawUrl.contains("appid=1406")
+                    val rkey = QqRkeyStore.downloadRkey(group)
+                        ?: error("QQ 富媒体 rkey 尚未取得，请稍后重试")
+                    "https://multimedia.nt.qq.com$rawUrl$rkey"
+                }
+                md5 != null -> "https://gchat.qpic.cn/gchatpic_new/0/0-0-$md5/0"
+                else -> error("QQ 未提供可读取的图片路径或地址")
             }
-            md5 != null -> "https://gchat.qpic.cn/gchatpic_new/0/0-0-$md5/0"
-            else -> error("QQ 未提供可读取的图片路径或地址")
+            downloadPicture(context, md5, url)
         }
+        remoteResult.getOrNull()?.let { return it }
+        reference.fallbackFile?.takeIf { file -> file.isFile && file.length() > 0L }?.let { file ->
+            log("使用 QQ 大图预览后备文件：size=${file.length()}")
+            return file
+        }
+        throw remoteResult.exceptionOrNull() ?: error("QQ 未提供可读取的图片")
+    }
+
+    private fun downloadPicture(context: Context, md5: String?, url: String): File {
         val directory = File(context.cacheDir, "emorepo-import").apply { mkdirs() }
         check(directory.isDirectory) { "无法创建 QQ 导入缓存" }
         val target = File(directory, "${md5 ?: System.currentTimeMillis()}.bin")
@@ -527,20 +638,21 @@ internal object EmoRepoMessageMenuHook {
         repeat(QQ_CACHE_WAIT_ATTEMPTS) {
             Thread.sleep(QQ_CACHE_WAIT_MILLIS)
             findMessageCacheFile(reference)?.let { (size, file) -> return size to file }
-            findExistingMessagePath(reference.message)?.let { return it }
+            reference.message?.let(::findExistingMessagePath)?.let { return it }
         }
         return null
     }
 
     private fun findMessageCacheFile(reference: PictureRef): Pair<String, File>? {
+        val message = reference.message ?: return null
         val elementId = runCatching {
             reference.element.javaClass.getMethod("getElementId").invoke(reference.element) as Long
         }.getOrNull() ?: return null
         val picSizeClass = XposedHelpers.findClass(
             "com.tencent.mobileqq.aio.msglist.holder.base.PicSize",
-            reference.message.javaClass.classLoader,
+            message.javaClass.classLoader,
         )
-        val pathMethod = reference.message.javaClass.methods.firstOrNull { method ->
+        val pathMethod = message.javaClass.methods.firstOrNull { method ->
             method.returnType == String::class.java &&
                 method.parameterTypes.size == 2 &&
                 method.parameterTypes[0] == Long::class.javaPrimitiveType &&
@@ -549,7 +661,7 @@ internal object EmoRepoMessageMenuHook {
         for (name in MESSAGE_CACHE_PRIORITY) {
             val size = picSizeClass.getField(name).get(null)
             val path = runCatching {
-                pathMethod.invoke(reference.message, elementId, size) as? String
+                pathMethod.invoke(message, elementId, size) as? String
             }.getOrNull()
             val file = path?.takeIf(String::isNotBlank)?.let(::File)
             if (file?.isFile == true && file.length() > 0L) return name to file
@@ -601,9 +713,10 @@ internal object EmoRepoMessageMenuHook {
     )
 
     private data class PictureRef(
-        val message: Any,
+        val message: Any?,
         val element: Any,
         val picture: Any,
+        val fallbackFile: File?,
     )
 
     private data class MenuContract(

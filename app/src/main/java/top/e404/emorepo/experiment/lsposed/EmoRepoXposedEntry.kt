@@ -20,6 +20,8 @@ class EmoRepoXposedEntry : IXposedHookLoadPackage {
         EmoRepoMessageMenuHook.schedulePrewarm(param.classLoader)
         runCatching { EmoRepoMessageMenuHook.install(param.classLoader) }
             .onFailure { log("Hook QQ 图片消息菜单失败", it) }
+        runCatching { QqPreviewImportHook.install(param.classLoader) }
+            .onFailure { log("Hook QQ 大图预览菜单失败", it) }
     }
 
     private companion object {

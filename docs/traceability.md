@@ -88,3 +88,4 @@
 | GIT-002 | Android 新 clone 仅保留默认分支最近 5 个提交且不拉标签，远端历史不变 | `git/storage-maintenance.md` | implemented | `JGitRepositoryService.resolveRemoteDefaultBranch`、depth/no-tags clone；JVM bare 远端集成测试通过，Android 新 clone 待真机验收 |
 | STORE-004 | 同步成功后按空间阈值自动滚动浅边界并安全 GC，维护失败不影响读取 | `git/storage-maintenance.md`、`git/sync.md` | verified | `GitMaintenanceWorker`、JGit 文件 GC、空间阈值测试；CPH2609 失败保护、1.55 GiB→451 MiB、下一轮同步及 QQ 读取真机回归 |
 | UI-025 | 设置页显示仓库空间/历史模式并提供后台立即优化入口 | `git/storage-maintenance.md`、`ui/app.md` | verified | `SettingsScreen`、`EmoRepoState`、维护状态持久化；CPH2609 完整/浅历史、失败/成功状态和手动入口真机验收 |
+| HOOK-012 | QQ 聊天图片和表情的大图预览长按抽屉增加“添加到 EmoRepo”，只导入当前显示原图并复用既有确认流程 | `architecture/qq-panel.md` | verified | `QqPreviewImportHook`、`EmoRepoMessageMenuHook`；QQ 9.1.70“洛”中新版图片操作行、旧式表情操作行、图标、原图解析、目标窗、取消无写入及无崩溃真机通过 |
