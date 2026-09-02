@@ -337,10 +337,7 @@ internal object EmoRepoMessageMenuHook {
     }
 
     private fun listPacks(context: Context): List<PanelPack> {
-        return QqPanelRepository.listPacks(context)
-            .filter { pack ->
-                pack.writable && pack.id != EmoRepoIpcContract.VIRTUAL_RECENT_PACK_ID
-            }
+        return importTargetPacks(QqPanelRepository.listPacks(context))
             .also { packs -> check(packs.isNotEmpty()) { "EmoRepo 没有可导入的表情包" } }
     }
 

@@ -4,6 +4,7 @@ package top.e404.emorepo.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -57,7 +58,7 @@ internal suspend fun preloadPackPreviews(
                     cacheDirectory = cacheDirectory,
                     file = repository.imageFile(pack.name, record.name),
                     key = "${record.md5}:256",
-                    diskName = "${record.md5}-256.webp",
+                    diskName = "${record.md5}-256.thumb",
                     targetSize = 256,
                 )
             }
@@ -120,7 +121,7 @@ fun FilteredThumbnail(
                 cacheDirectory = cacheDirectory,
                 file = file,
                 key = "$md5:$targetSizePx",
-                diskName = "$md5-$targetSizePx.webp",
+                diskName = "$md5-$targetSizePx.thumb",
                 targetSize = targetSizePx,
             )
         }
@@ -182,7 +183,7 @@ private fun AnimatedGifPreview(
 
 private const val MAXIMUM_PLACEHOLDER_SIZE = 512
 
-private const val THUMBNAIL_CACHE_DIRECTORY = "emoticon-thumbnails-v1"
+private const val THUMBNAIL_CACHE_DIRECTORY = "emoticon-thumbnails-v2"
 
 private object ThumbnailCache {
     private const val MEMORY_MAXIMUM_BYTES = 12L * 1024L * 1024L
@@ -267,7 +268,12 @@ private object ThumbnailCache {
         val temporary = File(directory, ".${target.name}.${Thread.currentThread().id}.tmp")
         val written = runCatching {
             FileOutputStream(temporary).use { output ->
-                check(bitmap.compress(Bitmap.CompressFormat.WEBP, WEBP_QUALITY, output))
+                val format = if (Build.VERSION.SDK_INT >= 30) {
+                    Bitmap.CompressFormat.WEBP_LOSSLESS
+                } else {
+                    Bitmap.CompressFormat.PNG
+                }
+                check(bitmap.compress(format, LOSSLESS_QUALITY, output))
                 output.flush()
                 output.fd.sync()
             }
@@ -339,5 +345,5 @@ private object ThumbnailCache {
     }
 
     private const val BYTES_PER_PIXEL = 4L
-    private const val WEBP_QUALITY = 90
+    private const val LOSSLESS_QUALITY = 100
 }
