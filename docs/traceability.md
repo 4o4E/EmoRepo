@@ -1,6 +1,6 @@
 # 需求追踪
 
-- 更新：2026-09-02
+- 更新：2026-10-10
 
 状态含义见 [`README.md`](README.md)。代码列为空表示尚未实现。
 
@@ -89,3 +89,5 @@
 | STORE-004 | 同步成功后按空间阈值自动滚动浅边界并安全 GC，维护失败不影响读取 | `git/storage-maintenance.md`、`git/sync.md` | verified | `GitMaintenanceWorker`、JGit 文件 GC、空间阈值测试；CPH2609 失败保护、1.55 GiB→451 MiB、下一轮同步及 QQ 读取真机回归 |
 | UI-025 | 设置页显示仓库空间/历史模式并提供后台立即优化入口 | `git/storage-maintenance.md`、`ui/app.md` | verified | `SettingsScreen`、`EmoRepoState`、维护状态持久化；CPH2609 完整/浅历史、失败/成功状态和手动入口真机验收 |
 | HOOK-012 | QQ 聊天图片和表情的大图预览长按抽屉增加“添加到 EmoRepo”，只导入当前显示原图并复用既有确认流程 | `architecture/qq-panel.md` | verified | `QqPreviewImportHook`、`EmoRepoMessageMenuHook`；QQ 9.1.70“洛”中新版图片操作行、旧式表情操作行、图标、原图解析、目标窗、取消无写入及无崩溃真机通过 |
+| SYNC-008 | 表情修改采用 10 秒尾沿防抖，运行中同步不被新修改取消，后续修改按代次合并且不被旧轮完成标记清除 | `git/sync.md`、`android/runtime.md` | implemented | `GitSyncScheduler`、`GitSyncWorker`、`ModificationSyncState`、`ModificationSyncStore`；3 项状态/边界 JVM 测试及当前源码类型检查通过；Android WorkManager 调度和进程恢复待验收，Gradle 因缺少生产签名配置被阻止 |
+| HOOK-013 | QQ 连续添加时目标准备不排在预览下载、导入 IPC 或 Git 写入锁等待之后 | `architecture/qq-panel.md`、`git/sync.md` | implemented | `QqImportTaskQueues`、`EmoRepoMessageMenuHook`、`QqImportTaskQueuesTest`；2 项队列并发测试，连同既有仓库测试共 29 项 JVM 测试通过；真实 JGit STAGE 暂停期间查询约 1 ms，补提交/push 和独立克隆原图字节通过；新 APK/QQ 真机待生产签名配置及设备 |

@@ -19,7 +19,6 @@ import java.net.URL
 import java.net.HttpURLConnection
 import java.util.ArrayList
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import net.bytebuddy.ByteBuddy
 import net.bytebuddy.android.AndroidClassLoadingStrategy
@@ -68,7 +67,7 @@ internal object EmoRepoMessageMenuHook {
 
     fun prewarm(context: Context, classLoader: ClassLoader) {
         QqPanelIntegration.ensureInstalled(context, classLoader)
-        worker.execute {
+        taskQueues.preparation.execute {
             runCatching {
                 QqSymbolLocator.resolveAbstractMenuItem(context, classLoader, ::log)
             }.onSuccess { menuClass ->
@@ -322,7 +321,7 @@ internal object EmoRepoMessageMenuHook {
     private fun onMenuClick(context: Context, message: Any) {
         val summary = summarizeMessage(message)
         log("点击添加到 EmoRepo：$summary")
-        worker.execute {
+        taskQueues.preparation.execute {
             runCatching {
                 val pictures = extractPictureElements(message)
                 check(pictures.isNotEmpty()) { "消息中没有可导入的图片" }
@@ -337,7 +336,7 @@ internal object EmoRepoMessageMenuHook {
     }
 
     fun startPreviewImport(context: Context, previewOwner: Any) {
-        worker.execute {
+        taskQueues.preparation.execute {
             runCatching {
                 val picture = extractCurrentPreviewPicture(previewOwner)
                 listPacks(context) to listOf(picture)
@@ -351,7 +350,7 @@ internal object EmoRepoMessageMenuHook {
     }
 
     fun startResolvedPreviewImport(context: Context, file: File) {
-        worker.execute {
+        taskQueues.preparation.execute {
             runCatching { listPacks(context) }.onSuccess { packs ->
                 mainHandler.post {
                     val chooser = EmoRepoImportDialog.show(context, packs, 1) { packId ->
@@ -422,7 +421,7 @@ internal object EmoRepoMessageMenuHook {
             importPictures(context, packId, pictures)
         }
         val first = pictures.firstOrNull() ?: return
-        worker.execute {
+        taskQueues.preview.execute {
             runCatching { resolvePictureFile(context, first) }
                 .onSuccess { file -> mainHandler.post { chooser.updatePreview(file) } }
                 .onFailure { error -> log("加载待导入首图预览失败", error) }
@@ -430,7 +429,7 @@ internal object EmoRepoMessageMenuHook {
     }
 
     private fun importPictures(context: Context, packId: String, pictures: List<PictureRef>) {
-        worker.execute {
+        taskQueues.imports.execute {
             runCatching {
                 val sources = pictures.mapIndexed { index, picture ->
                     val source = resolvePictureFile(context, picture)
@@ -449,7 +448,7 @@ internal object EmoRepoMessageMenuHook {
     }
 
     private fun importResolvedPictures(context: Context, packId: String, sources: List<Pair<String, File>>) {
-        worker.execute {
+        taskQueues.imports.execute {
             runCatching { performImport(context, packId, sources) }
                 .onSuccess { feedback -> showImportFeedback(context, feedback) }
                 .onFailure { error ->
@@ -581,11 +580,11 @@ internal object EmoRepoMessageMenuHook {
         throw remoteResult.exceptionOrNull() ?: error("QQ 未提供可读取的图片")
     }
 
-    private fun downloadPicture(context: Context, md5: String?, url: String): File {
+    private fun downloadPicture(context: Context, md5: String?, url: String): File = synchronized(downloadLock) {
         val directory = File(context.cacheDir, "emorepo-import").apply { mkdirs() }
         check(directory.isDirectory) { "无法创建 QQ 导入缓存" }
         val target = File(directory, "${md5 ?: System.currentTimeMillis()}.bin")
-        if (target.isFile && target.length() > 0L) return target
+        if (target.isFile && target.length() > 0L) return@synchronized target
         val temporary = File(directory, ".${target.name}.tmp")
         temporary.delete()
         val connection = URL(url).openConnection().apply {
@@ -619,7 +618,7 @@ internal object EmoRepoMessageMenuHook {
             (connection as? HttpURLConnection)?.disconnect()
         }
         log("已下载 QQ 原图：size=${target.length()}")
-        return target
+        target
     }
 
     private fun findExistingMessagePath(message: Any): Pair<String, File>? =
@@ -765,9 +764,8 @@ internal object EmoRepoMessageMenuHook {
         "PIC_LOCAL_HD_THUMB",
         "PIC_DOWNLOAD_THUMB",
     )
-    private val worker = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "EmoRepo-QQ-Import")
-    }
+    private val taskQueues = QqImportTaskQueues()
+    private val downloadLock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val PICTURE_COMPONENT_PACKAGES = listOf(
         "com.tencent.mobileqq.aio.msglist.holder.component.pic.",
