@@ -65,8 +65,8 @@
 | STORE-002 | 单文件刷新、替换和中断恢复 | `management/persistence.md` | verified | `AtomicFileStore`、`AtomicFileStoreTest` |
 | STORE-003 | 图片和多个索引之间使用可恢复事务日志 | `management/persistence.md` | confirmed | — |
 | RELEASE-001 | 普通提交构建可调试 dev 渠道并只上传 Actions Artifact | `release/ci-and-updates.md` | verified | `android-dev.yml`、`collect-apks.sh`；run `33034944943` 的五 APK Artifact、SHA-256、dev 包名/版本/调试状态和持久签名验收 |
-| RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | verified | `android-release.yml`；`v0.3.1` run `33418728159`、五个签名 APK 和 GitHub Release 独立下载验收 |
-| RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `v0.3.1` `release-index.json` 的 tag/commit/版本/五 ABI/尺寸/SHA-256/证书/下载地址独立验收 |
+| RELEASE-002 | `v*` 标签构建签名 ABI/universal APK 并发布 GitHub Release | `release/ci-and-updates.md` | verified | `android-release.yml`；`v0.6.3` run `38036441407` 完整 JVM 测试、五包生产签名构建及 GitHub Release 独立下载验收 |
+| RELEASE-003 | Release 附带含版本、下载地址和 SHA-256 的更新索引 | `release/ci-and-updates.md` | verified | `v0.6.3` 的索引 tag/commit/6003 版本码/五 ABI/尺寸/摘要/证书/URL 全部匹配；匿名 latest 更新索引返回 0.6.3 |
 | DIAG-001 | App、同步和 QQ Hook 生成脱敏轮转文件日志，并可导出诊断 ZIP | `diagnostics/logging.md` | verified | `DiagnosticLogger`、`DiagnosticLogStore`、`QqDiagnosticBridge`、`DiagnosticExporter`；102 项 JVM 测试，0.3.1 真机 App/QQ 文件日志、系统导出和 ZIP 隐私检查通过 |
 | SYNC-005 | 同步按阶段记录完整异常，并安全恢复陈旧 Git 索引锁 | `diagnostics/logging.md` | verified | `GitSyncExecutor`、`JGitRepositoryService`；陈旧锁恢复/损坏索引保留 JVM 测试，0.3.1 真机恢复 23.7 小时旧锁并完成 add/fetch/rebase/校验/push |
 | HOOK-005 | QQ 面板将折叠包连续置于分页末尾并在同一包栏内展开；横向分页首尾循环且恢复各包网格滚动位置 | `architecture/qq-panel.md` | superseded | 已由 HOOK-008 的单一纵向连续容器取代，历史真机结果保留在专题文档 |
@@ -89,5 +89,5 @@
 | STORE-004 | 同步成功后按空间阈值自动滚动浅边界并安全 GC，维护失败不影响读取 | `git/storage-maintenance.md`、`git/sync.md` | verified | `GitMaintenanceWorker`、JGit 文件 GC、空间阈值测试；CPH2609 失败保护、1.55 GiB→451 MiB、下一轮同步及 QQ 读取真机回归 |
 | UI-025 | 设置页显示仓库空间/历史模式并提供后台立即优化入口 | `git/storage-maintenance.md`、`ui/app.md` | verified | `SettingsScreen`、`EmoRepoState`、维护状态持久化；CPH2609 完整/浅历史、失败/成功状态和手动入口真机验收 |
 | HOOK-012 | QQ 聊天图片和表情的大图预览长按抽屉增加“添加到 EmoRepo”，只导入当前显示原图并复用既有确认流程 | `architecture/qq-panel.md` | verified | `QqPreviewImportHook`、`EmoRepoMessageMenuHook`；QQ 9.1.70“洛”中新版图片操作行、旧式表情操作行、图标、原图解析、目标窗、取消无写入及无崩溃真机通过 |
-| SYNC-008 | 表情修改采用 10 秒尾沿防抖，运行中同步不被新修改取消，后续修改按代次合并且不被旧轮完成标记清除 | `git/sync.md`、`android/runtime.md` | implemented | `GitSyncScheduler`、`GitSyncWorker`、`ModificationSyncState`、`ModificationSyncStore`；3 项状态/边界 JVM 测试及当前源码类型检查通过；Android WorkManager 调度和进程恢复待验收，Gradle 因缺少生产签名配置被阻止 |
-| HOOK-013 | QQ 连续添加时目标准备不排在预览下载、导入 IPC 或 Git 写入锁等待之后 | `architecture/qq-panel.md`、`git/sync.md` | implemented | `QqImportTaskQueues`、`EmoRepoMessageMenuHook`、`QqImportTaskQueuesTest`；2 项队列并发测试，连同既有仓库测试共 29 项 JVM 测试通过；真实 JGit STAGE 暂停期间查询约 1 ms，补提交/push 和独立克隆原图字节通过；新 APK/QQ 真机待生产签名配置及设备 |
+| SYNC-008 | 表情修改采用 10 秒尾沿防抖，运行中同步不被新修改取消，后续修改按代次合并且不被旧轮完成标记清除 | `git/sync.md`、`android/runtime.md` | implemented | `GitSyncScheduler`、`GitSyncWorker`、`ModificationSyncState`、`ModificationSyncStore`；3 项状态/边界 JVM 测试及源码类型检查通过；0.6.3 Dev/Release CI 完整 JVM 测试和生产签名构建通过；Android WorkManager 调度及进程恢复待真机验收 |
+| HOOK-013 | QQ 连续添加时目标准备不排在预览下载、导入 IPC 或 Git 写入锁等待之后 | `architecture/qq-panel.md`、`git/sync.md` | implemented | `QqImportTaskQueues`、`EmoRepoMessageMenuHook`、`QqImportTaskQueuesTest`；2 项队列并发测试，连同既有仓库测试共 29 项 JVM 测试通过；真实 JGit STAGE 暂停期间查询约 1 ms，补提交/push 和独立克隆原图字节通过；0.6.3 APK 已签名发布并校验，QQ 真机待验收 |

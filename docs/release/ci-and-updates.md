@@ -1,7 +1,7 @@
 # CI、发布与更新索引
 
 - 状态：`verified`
-- 更新：2026-09-02
+- 更新：2026-10-10
 
 ## 构建渠道
 
@@ -199,3 +199,12 @@ https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 - 独立下载后，五个 APK 的文件大小和 SHA-256 均与索引、`SHA256SUMS` 及 GitHub asset digest 一致；五包证书 SHA-256 均为 `95aea64497d6e79e56a29d77624f876d27e5ad1c7d0fc867932cc7f556268022`。
 - 五个 APK 均为 `top.e404.emorepo`、`versionCode=6002`、`versionName=0.6.2`、`minSdk=24`、`targetSdk=36`；ABI 分包只包含目标架构，universal 包含四种架构，索引 tag、commit、ABI 顺序、尺寸、摘要和下载地址均匹配。
 - 当前测试机继续保留历史 Debug 证书安装和私有仓库；本次未用生产签名 0.6.2 覆盖，避免 Android 因证书不同要求卸载数据。
+
+## 2026-10-10 0.6.3 release 验收
+
+- 标签 `v0.6.3` 指向 `6da9a008516e6102720e33f32feaf15c5c6d850e`；main dev run `38036181482` 和 release run `38036441407` 均成功完成完整 JVM 测试及生产签名构建，正式版流程另完成五包签名校验、更新索引生成和 GitHub Release 创建。
+- GitHub Release `EmoRepo 0.6.3` 为 latest，不是 draft/prerelease，包含 universal、arm64-v8a、armeabi-v7a、x86、x86_64 五包、`SHA256SUMS` 和 `release-index.json`；发布说明明确区分源码/JVM/CI 验证与尚未完成的 QQ 真机验收。
+- 独立下载后，五个 APK 的大小和 SHA-256 均与索引、`SHA256SUMS` 及 GitHub asset digest 一致；五包全部通过 v2 签名校验，证书 SHA-256 均为 `95aea64497d6e79e56a29d77624f876d27e5ad1c7d0fc867932cc7f556268022`。
+- 五包均为 `top.e404.emorepo`、`versionCode=6003`、`versionName=0.6.3`、`minSdk=24`、`targetSdk=36` 且不可调试；ABI 分包只含目标架构，universal 含四种架构。索引 tag、commit、ABI 固定顺序、尺寸、摘要和下载 URL 均匹配。
+- 匿名访问 `releases/latest/download/release-index.json` 返回 `v0.6.3`、`versionCode=6003` 和该发布提交。CI 通过仓库生产签名 Secrets 构建，未要求读取私钥到本机、未回退临时签名。
+- 本版包含 10 秒尾沿防抖、运行中同步安全合并和 QQ 添加面板任务隔离。当前 ADB 无设备，没有声称覆盖安装、Android WorkManager 进程恢复或 QQ 连续添加已真机通过。

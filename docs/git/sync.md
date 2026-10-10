@@ -104,3 +104,4 @@
 - 新增 3 项防抖代次/到期边界测试、2 项导入队列并发测试，连同既有仓库测试共 29 项 JVM 测试通过。使用项目声明的 WorkManager 2.11.2、JGit 7.7.1 和 Android 36 API 对受影响源码及当前 Git/仓库依赖闭包进行 Kotlin JVM 17 类型检查，通过。
 - Gradle `:app:testDebugUnitTest :app:assembleDebug` 在配置阶段被生产签名前置校验阻止：未配置 `local-signing.properties` 或 `EMOREPO_*` 签名环境变量。未生成新版 APK，未绕过固定生产证书要求。
 - ADB 无连接设备；上述约 1 ms 是 JVM 仓库查询耗时，不是 QQ 窗口显示耗时。Android WorkManager 的实际尾沿调度、进程退出恢复、运行中任务合并和 QQ 连续添加窗口仍需真机验收。
+- 后续 0.6.3 发布已通过 GitHub Actions main dev run `38036181482` 和 release run `38036441407` 的完整 JVM 测试及生产签名 Debug/Release 构建；五个正式 APK 的独立下载、摘要、证书、版本和 ABI 校验通过。此前本地签名缺失的限制仍存在，但已通过 CI 正式产出新版 APK；不以构建和发布通过替代上述真机验收。
