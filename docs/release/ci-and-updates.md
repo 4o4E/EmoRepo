@@ -1,7 +1,7 @@
 # CI、发布与更新索引
 
 - 状态：`verified`
-- 更新：2026-10-10
+- 更新：2026-11-26
 
 ## 构建渠道
 
@@ -208,3 +208,9 @@ https://github.com/4o4E/EmoRepo/releases/latest/download/release-index.json
 - 五包均为 `top.e404.emorepo`、`versionCode=6003`、`versionName=0.6.3`、`minSdk=24`、`targetSdk=36` 且不可调试；ABI 分包只含目标架构，universal 含四种架构。索引 tag、commit、ABI 固定顺序、尺寸、摘要和下载 URL 均匹配。
 - 匿名访问 `releases/latest/download/release-index.json` 返回 `v0.6.3`、`versionCode=6003` 和该发布提交。CI 通过仓库生产签名 Secrets 构建，未要求读取私钥到本机、未回退临时签名。
 - 本版包含 10 秒尾沿防抖、运行中同步安全合并和 QQ 添加面板任务隔离。当前 ADB 无设备，没有声称覆盖安装、Android WorkManager 进程恢复或 QQ 连续添加已真机通过。
+
+## 2026-11-26 0.6.4 release 验收
+
+- 标签 `v0.6.4` 指向 `2d2cbeff4e2559fa32bb1ef9252405776aa5a847`；[release run `45768473169`](https://github.com/4o4E/EmoRepo/actions/runs/45768473169) 完成 JVM 测试、五个生产签名 APK 构建、签名校验和更新索引发布。
+- 公开 `latest` 返回 `v0.6.4`，索引版本码为 `6004`。独立下载的 universal 及四个 ABI 分包与索引、`SHA256SUMS`、GitHub asset 的大小和摘要一致；五包通过 v2 签名校验，包名、版本、SDK、ABI 和正式版非调试标记均匹配。
+- 本版包含批量跨包移动、列表和平铺长按排序。两项功能已用 Pad 上的测试仓库离线副本验收，未测试 QQ 发送。
