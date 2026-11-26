@@ -684,6 +684,7 @@ class EmoRepoState(
         packName: String,
         originalMd5Order: List<String>,
         finalMd5Order: List<String>,
+        moves: Map<String, List<String>>,
         onSuccess: () -> Unit = {},
         onComplete: () -> Unit = {},
     ) {
@@ -694,6 +695,7 @@ class EmoRepoState(
                     packName = packName,
                     originalMd5Order = originalMd5Order,
                     finalMd5Order = finalMd5Order,
+                    moves = moves,
                     recentDeviceId = settings.deviceId,
                     recentMaximumRecords = settings.recentMaximumRecords,
                 )

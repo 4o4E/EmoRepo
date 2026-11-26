@@ -347,17 +347,10 @@ private fun PackCollection(
                 val leadingPacks = if (editing) packs else normalPacks
                 items(leadingPacks, key = { it.name }) { pack ->
                     ReorderableItem(reorderState, key = pack.name) { isDragging ->
-                        val dragModifier = if (editing) {
-                            Modifier.draggableHandle(
-                                onDragStarted = { dragStarted() },
-                                onDragStopped = { dragStopped() },
-                            )
-                        } else {
-                            Modifier.longPressDraggableHandle(
-                                onDragStarted = { dragStarted() },
-                                onDragStopped = { dragStopped() },
-                            )
-                        }
+                        val dragModifier = Modifier.longPressDraggableHandle(
+                            onDragStarted = { dragStarted() },
+                            onDragStopped = { dragStopped() },
+                        )
                         PackListCard(
                             pack = pack,
                             repository = repository,
@@ -455,17 +448,10 @@ private fun PackCollection(
                 val leadingPacks = if (editing) packs else normalPacks
                 items(leadingPacks, key = { it.name }) { pack ->
                     ReorderableItem(reorderState, key = pack.name) { isDragging ->
-                        val dragModifier = if (editing) {
-                            Modifier.draggableHandle(
-                                onDragStarted = { dragStarted() },
-                                onDragStopped = { dragStopped() },
-                            )
-                        } else {
-                            Modifier.longPressDraggableHandle(
-                                onDragStarted = { dragStarted() },
-                                onDragStopped = { dragStopped() },
-                            )
-                        }
+                        val dragModifier = Modifier.longPressDraggableHandle(
+                            onDragStarted = { dragStarted() },
+                            onDragStopped = { dragStopped() },
+                        )
                         PackGridCard(
                             pack = pack,
                             repository = repository,

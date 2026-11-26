@@ -343,6 +343,7 @@ class EmoticonRepositoryTest {
             packName = "cats",
             originalMd5Order = original.map { it.md5 },
             finalMd5Order = finalOrder,
+            moves = emptyMap(),
             recentDeviceId = "phone",
             recentMaximumRecords = 30,
         )
@@ -354,6 +355,54 @@ class EmoticonRepositoryTest {
             RecentUsageRepository(File(temporaryFolder.root, "repository"), "phone")
                 .readCurrentDevice().isEmpty(),
         )
+    }
+
+    @Test
+    fun draftMovePreservesBatchOrderDuplicateAndRecentHistory() {
+        val repo = repository()
+        repo.createPack("source")
+        repo.createPack("target")
+        val images = (1..5).map { ImportCandidate("$it.png", png(it)) }
+        repo.import("source", images)
+        repo.import("target", listOf(images[2]))
+        val original = repo.getPack("source").records
+        val ids = original.map { it.md5 }
+        val duplicate = repo.setIcon("target", ids[2]).records.single()
+        val recent = RecentUsageRepository(File(temporaryFolder.root, "repository"), "phone")
+        recent.recordUse("source", original[1].name, 30)
+        recent.recordUse("source", original[4].name, 20)
+
+        repo.applyPackEdit("source", ids, listOf(ids[3]), mapOf("target" to listOf(ids[1], ids[2], ids[0])), "phone", 30)
+
+        assertEquals(listOf(original[3]), repo.getPack("source").records)
+        assertEquals(listOf(original[1], original[0], duplicate), repo.getPack("target").records)
+        assertArrayEquals(png(2), repo.imageFile("target", original[1].name).readBytes())
+        val usage = recent.readCurrentDevice().single()
+        assertEquals("target", usage.packageName)
+        assertEquals(original[1].name, usage.name)
+    }
+
+    @Test
+    fun conflictingSecondDestinationRollsBackFirstMoveAndDraftDeletion() {
+        val repo = repository()
+        listOf("source", "first", "second").forEach { repo.createPack(it) }
+        repo.import("source", (1..3).map { ImportCandidate("$it.png", png(it)) })
+        val records = repo.getPack("source").records
+        val ids = records.map { it.md5 }
+        val conflict = repo.imageFile("second", records[1].name)
+        conflict.writeBytes(png(99))
+
+        assertThrows(ProtocolException::class.java) {
+            repo.applyPackEdit("source", ids, emptyList(), mapOf("first" to ids.take(1), "second" to listOf(ids[1])), "phone", 30)
+        }
+
+        assertEquals(records, repo.getPack("source").records)
+        records.forEachIndexed { index, record ->
+            assertArrayEquals(png(index + 1), repo.imageFile("source", record.name).readBytes())
+        }
+        assertTrue(repo.getPack("first").records.isEmpty())
+        assertFalse(repo.imageFile("first", records[0].name).exists())
+        assertArrayEquals(png(99), conflict.readBytes())
     }
 
     @Test

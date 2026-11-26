@@ -85,6 +85,24 @@ class RecentUsageRepository(
         writeDeviceFile(file, applyMaintenanceLimit(RecentCsvCodec.merge(updated)))
     }
 
+    internal fun applyPackEdit(
+        packName: String,
+        removed: Set<String>,
+        destinations: Map<String, Pair<String, String>>,
+    ) = lock.withLock {
+        val file = deviceFile(deviceId)
+        if (removed.isEmpty() || !file.exists()) return@withLock
+        val current = readDeviceFile(file)
+        if (current.none { it.packageName == packName && it.name in removed }) return@withLock
+        val updated = current.mapNotNull { record ->
+            if (record.packageName != packName || record.name !in removed) record
+            else destinations[record.name]?.let { (target, name) ->
+                RecentUsageRecord(target, name, record.time)
+            }
+        }
+        writeDeviceFile(file, applyMaintenanceLimit(RecentCsvCodec.merge(updated)))
+    }
+
     fun renameDevice(newDeviceId: String): RecentUsageRepository = lock.withLock {
         validateDeviceId(newDeviceId)
         if (newDeviceId == deviceId) return@withLock this

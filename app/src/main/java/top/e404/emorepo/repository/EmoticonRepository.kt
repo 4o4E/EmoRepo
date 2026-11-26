@@ -196,6 +196,7 @@ class EmoticonRepository(
         packName: String,
         originalMd5Order: List<String>,
         finalMd5Order: List<String>,
+        moves: Map<String, List<String>>,
         recentDeviceId: String,
         recentMaximumRecords: Int,
     ): EmoticonPack = withContentLock {
@@ -204,26 +205,62 @@ class EmoticonRepository(
         if (records.map { it.md5 } != originalMd5Order) {
             throw ProtocolException("emoticon pack changed while editing")
         }
-        if (finalMd5Order.size != finalMd5Order.toSet().size || !originalMd5Order.containsAll(finalMd5Order)) {
+        val byMd5 = records.associateBy { it.md5 }
+        val retained = finalMd5Order.toHashSet()
+        if (retained.size != finalMd5Order.size || !byMd5.keys.containsAll(retained)) {
             throw ProtocolException("final edit order must be a unique subset of original emoticons")
         }
-        val byMd5 = records.associateBy { it.md5 }
+        val assigned = HashSet(retained)
+        moves.forEach { (target, ids) ->
+            if (target == packName || ids.any { it !in byMd5 || !assigned.add(it) }) {
+                throw ProtocolException("invalid move in pack edit: $target")
+            }
+        }
         val finalRecords = finalMd5Order.map(byMd5::getValue)
-        val deletedRecords = records.filterNot { it.md5 in finalMd5Order.toSet() }
-        val transaction = beginPackTransaction(PackTransactionOperation.EDIT, packName, null)
+        val removed = records.filterNot { it.md5 in retained }
+        val transaction = beginPackTransaction(PackTransactionOperation.EDIT, packName, null, moves.keys)
         val deletedDirectory = File(transaction, TRANSACTION_DELETED_DIRECTORY).apply {
             if (!mkdirs() && !isDirectory) throw IOException("cannot create edit transaction directory")
         }
         try {
-            deletedRecords.forEach { record ->
+            removed.forEach { record ->
                 val source = File(directory, record.name)
                 if (source.exists() && !source.renameTo(File(deletedDirectory, record.name))) {
                     throw IOException("cannot stage deleted emoticon: ${record.name}")
                 }
             }
+            val destinations = mutableMapOf<String, Pair<String, String>>()
+            for ((target, ids) in moves) {
+                val targetDir = requirePackDirectory(target)
+                val existing = readRecords(targetDir)
+                val existingById = existing.associateBy { it.md5 }
+                val additions = mutableListOf<EmoticonRecord>()
+                val undo = File(File(transaction, TRANSACTION_TARGETS), target)
+                for (id in ids) {
+                    val source = byMd5.getValue(id)
+                    val duplicate = existingById[id]
+                    val record = duplicate ?: source.copy(icon = false)
+                    val staged = File(deletedDirectory, source.name)
+                    val destination = File(targetDir, record.name)
+                    if (!staged.isFile) throw IOException("来源图片不存在：${source.name}")
+                    if (duplicate != null || destination.exists()) {
+                        if (!destination.isFile || !sameImageBytes(staged, destination)) {
+                            throw ProtocolException("目标图片缺失或内容不一致：$target/${record.name}")
+                        }
+                    } else {
+                        // 先留下撤销标记，再原子改名；中断恢复不需要复制原图。
+                        if (!File(undo, record.name).createNewFile() || !staged.renameTo(destination)) {
+                            throw IOException("无法移动图片：$target/${record.name}")
+                        }
+                    }
+                    if (duplicate == null) additions.add(record)
+                    destinations[source.name] = target to record.name
+                }
+                if (additions.isNotEmpty()) writeAndVerify(targetDir, additions + existing)
+            }
             writeRecords(directory, finalRecords)
-            val recent = RecentUsageRepository(root, recentDeviceId, recentMaximumRecords)
-            deletedRecords.forEach { record -> recent.remove(packName, record.name) }
+            RecentUsageRepository(root, recentDeviceId, recentMaximumRecords)
+                .applyPackEdit(packName, removed.mapTo(HashSet()) { it.name }, destinations)
             val verified = readRecords(directory)
             if (verified.map { it.md5 } != finalMd5Order) throw ProtocolException("pack edit verification failed")
             val collapsed = readPackIndex(packDirectories()).first { it.name == packName }.collapsed
@@ -232,6 +269,22 @@ class EmoticonRepository(
         } catch (error: Exception) {
             recoverPackTransaction()
             throw error
+        }
+    }
+
+    private fun sameImageBytes(first: File, second: File): Boolean {
+        if (first.length() != second.length()) return false
+        first.inputStream().use { left ->
+            second.inputStream().use { right ->
+                val a = ByteArray(DEFAULT_BUFFER_SIZE)
+                val b = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = left.read(a)
+                    if (count != right.read(b)) return false
+                    if (count < 0) return true
+                    for (i in 0 until count) if (a[i] != b[i]) return false
+                }
+            }
         }
     }
 
@@ -536,6 +589,7 @@ class EmoticonRepository(
         operation: PackTransactionOperation,
         sourceName: String,
         targetName: String?,
+        editTargets: Set<String> = emptySet(),
     ): File {
         cleanCompletedPackTransaction()
         val transaction = transactionDirectory()
@@ -560,6 +614,10 @@ class EmoticonRepository(
         if (operation == PackTransactionOperation.EDIT) {
             val packIndex = File(requirePackDirectory(sourceName), INDEX_FILE_NAME)
             packIndex.copyTo(File(preparing, TRANSACTION_PACK_INDEX), overwrite = true)
+            for (target in editTargets) {
+                val targetBackup = File(File(preparing, TRANSACTION_TARGETS), target)
+                File(requirePackDirectory(target), INDEX_FILE_NAME).copyTo(File(targetBackup, INDEX_FILE_NAME))
+            }
         }
         FileOutputStream(File(preparing, TRANSACTION_MANIFEST)).use { output ->
             properties.store(output, null)
@@ -616,6 +674,17 @@ class EmoticonRepository(
                 }
             }
             PackTransactionOperation.EDIT -> {
+                for (backup in File(transaction, TRANSACTION_TARGETS).listFiles().orEmpty()) {
+                    val target = requirePackDirectory(backup.name)
+                    for (marker in backup.listFiles().orEmpty()) {
+                        if (marker.name == INDEX_FILE_NAME) continue
+                        val moved = File(target, marker.name)
+                        if (moved.exists() && !moved.renameTo(File(source, marker.name))) {
+                            throw IOException("cannot restore moved emoticon: ${marker.name}")
+                        }
+                    }
+                    AtomicFileStore.writeBytes(File(target, INDEX_FILE_NAME), File(backup, INDEX_FILE_NAME).readBytes())
+                }
                 val deleted = File(transaction, TRANSACTION_DELETED_DIRECTORY)
                 deleted.listFiles().orEmpty().forEach { staged ->
                     val target = File(source, staged.name)
@@ -707,6 +776,7 @@ class EmoticonRepository(
         const val TRANSACTION_RECENT_DIRECTORY = "recent-backup"
         const val TRANSACTION_PACK_DIRECTORY = "pack"
         const val TRANSACTION_DELETED_DIRECTORY = "deleted"
+        const val TRANSACTION_TARGETS = "edit-targets"
     }
 
     private data class PackReadState(

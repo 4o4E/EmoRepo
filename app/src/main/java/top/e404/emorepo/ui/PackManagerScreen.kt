@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -32,7 +34,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,11 +61,13 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
         return
     }
 
-    var editing by rememberSaveable(packName) { mutableStateOf(false) }
+    var editing by remember(packName) { mutableStateOf(false) }
     var originalOrder by remember(packName) { mutableStateOf(emptyList<String>()) }
     var draftOrder by remember(packName) { mutableStateOf(emptyList<String>()) }
-    var selectedNames by rememberSaveable(packName) { mutableStateOf(emptyList<String>()) }
-    var deleteDialog by rememberSaveable(packName) { mutableStateOf(false) }
+    var moves by remember(packName) { mutableStateOf(emptyMap<String, List<String>>()) }
+    var selectedNames by remember(packName) { mutableStateOf(emptyList<String>()) }
+    var deleteDialog by remember(packName) { mutableStateOf(false) }
+    var choosingTarget by remember(packName) { mutableStateOf(false) }
     var pendingImport by remember { mutableStateOf<PendingImport?>(null) }
     var previewPage by remember { mutableStateOf<Int?>(null) }
     val selected = selectedNames.toSet()
@@ -85,6 +88,7 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
         editing = false
         originalOrder = emptyList()
         draftOrder = emptyList()
+        moves = emptyMap()
         selectedNames = emptyList()
     }
 
@@ -103,6 +107,7 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
                 packName = packName,
                 originalMd5Order = originalOrder,
                 finalMd5Order = draftOrder,
+                moves = moves,
                 onSuccess = ::cancelEditing,
             )
         },
@@ -110,12 +115,36 @@ fun PackManagerScreen(state: EmoRepoState, packName: String, onBack: () -> Unit)
         onPreview = { record -> previewPage = pack.records.indexOfFirst { it.md5 == record.md5 } },
         onImport = { importLauncher.launch(arrayOf("image/*")) },
         onDelete = { deleteDialog = true },
+        onMove = { choosingTarget = true },
         onMoveToFront = {
             draftOrder = moveSelectedToFront(draftOrder, selected)
             selectedNames = emptyList()
         },
     )
 
+    if (choosingTarget) {
+        AlertDialog(
+            onDismissRequest = { choosingTarget = false },
+            title = { Text("移动到") },
+            text = {
+                LazyColumn {
+                    items(state.packs.filterNot { it.name == packName }, key = { it.name }) { target ->
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                val batch = draftOrder.filter { it in selected }
+                                moves = moves + (target.name to (batch + moves[target.name].orEmpty()))
+                                draftOrder = draftOrder.filterNot { it in selected }
+                                selectedNames = emptyList()
+                                choosingTarget = false
+                            },
+                        ) { Text(target.name) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingTarget = false }) { Text("取消") } },
+        )
+    }
     if (deleteDialog) {
         AlertDialog(
             onDismissRequest = { deleteDialog = false },
@@ -166,6 +195,7 @@ private fun PackManager(
     onPreview: (EmoticonRecord) -> Unit,
     onImport: () -> Unit,
     onDelete: () -> Unit,
+    onMove: () -> Unit,
     onMoveToFront: () -> Unit,
 ) {
     val orderedIds = remember(records) { records.map { it.md5 } }
@@ -227,6 +257,7 @@ private fun PackManager(
             ) {
                 Text("已选 ${selected.size}", modifier = Modifier.weight(1f))
                 TextButton(onClick = onMoveToFront, enabled = selected.isNotEmpty()) { Text("移动到开头") }
+                TextButton(onClick = onMove, enabled = selected.isNotEmpty() && state.packs.size > 1) { Text("移动到") }
                 TextButton(onClick = onDelete, enabled = selected.isNotEmpty()) { Text("删除") }
             }
         }
