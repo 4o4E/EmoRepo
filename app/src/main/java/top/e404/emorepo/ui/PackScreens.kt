@@ -358,7 +358,6 @@ private fun PackCollection(
                             isDragging = isDragging,
                             editing = editing,
                             modifier = dragModifier,
-                            onClick = { if (!editing) onPackClick(pack.name) },
                             onToggleCollapsed = { onToggleCollapsed(pack.name) },
                         )
                     }
@@ -459,7 +458,6 @@ private fun PackCollection(
                             isDragging = isDragging,
                             editing = editing,
                             modifier = dragModifier,
-                            onClick = { if (!editing) onPackClick(pack.name) },
                             onToggleCollapsed = { onToggleCollapsed(pack.name) },
                         )
                     }
@@ -503,12 +501,16 @@ private fun PackListCard(
     isDragging: Boolean = false,
     editing: Boolean = false,
     onToggleCollapsed: () -> Unit = {},
-    onLongClick: () -> Unit = {},
-    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     val elevation by animateDpAsState(if (isDragging) 8.dp else 0.dp, label = "pack-list-elevation")
     Card(
-        modifier = modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        // 编辑时卡片只监听排序手势，普通模式的长按菜单不参与手势竞争。
+        modifier = modifier.fillMaxWidth().then(
+            if (onClick == null) Modifier
+            else Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        ),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
             else MaterialTheme.colorScheme.surfaceVariant,
@@ -550,12 +552,15 @@ private fun PackGridCard(
     isDragging: Boolean = false,
     editing: Boolean = false,
     onToggleCollapsed: () -> Unit = {},
-    onLongClick: () -> Unit = {},
-    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     val elevation by animateDpAsState(if (isDragging) 8.dp else 0.dp, label = "pack-grid-elevation")
     Card(
-        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        modifier = modifier.then(
+            if (onClick == null) Modifier
+            else Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
         border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
     ) {

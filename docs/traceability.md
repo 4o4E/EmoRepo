@@ -1,6 +1,6 @@
 # 需求追踪
 
-- 更新：2026-10-10
+- 更新：2026-11-26
 
 状态含义见 [`README.md`](README.md)。代码列为空表示尚未实现。
 
@@ -50,13 +50,13 @@
 | UI-015 | 表情包平铺固定四列，首行显示表情包数和表情总数 | `ui/app.md` | verified | `PackGridLayout`；Android 四列和统计行验收 |
 | UI-016 | 全屏预览长按支持原文件导出和临时授权转发 | `ui/app.md` | verified | `FullScreenPreview`、`FileProvider`；Android 保存选择器和 Sharesheet URI 授权验收 |
 | UI-017 | 软件设置底部路由使用矢量齿轮图标 | `ui/app.md` | superseded | 已由 UI-022 的主页左上角三横线入口取代 |
-| UI-018 | 主页编辑模式下，列表和平铺普通滑动滚动，每次长按后才能拖动排序，“完成”才保存 | `ui/app.md` | implemented | `PackCollection` 两种布局已改用长按拖动；编辑模式交替滚动和排序待真机验收 |
+| UI-018 | 主页编辑模式下，列表和平铺普通滑动滚动，每次长按后才能拖动排序，“完成”才保存 | `ui/app.md` | verified | `PackCollection`；Pad 上列表连续两次拖动、平铺跨列与跨行拖动、普通滚动、完成前根索引不变、取消/系统返回恢复及完成后冷启动持久化通过 |
 | UI-019 | 添加页复用表情包列表/四列平铺和布局切换 | `ui/app.md` | superseded | 独立添加页已由 UI-022 移除 |
 | UI-020 | 软件设置可选择 QQ 面板每行 3–8 个表情并在下次打开面板时生效 | `ui/app.md` | verified | `AppSettings`、`SettingsStore`、`SettingsScreen`、`EmoRepoContentProvider`；边界 JVM 测试，App 保存 6 列及 QQ 真机首行 6 个验收 |
 | UI-021 | App 表情包列表使用单一折叠区，只有编辑操作能改变折叠状态 | `ui/app.md` | verified | `PackCollection`、`PackListScreen`、`EmoRepoState.updatePackArrangement`；默认收起、展开、编辑切换、完成后 JSONL 仅写目标字段真机验收 |
 | UI-022 | App 使用单层导航，主页提供新建包和长按管理，包内容以加号导入并通过草稿编辑完成保存 | `ui/app.md`、`management/emoticons.md` | verified | `EmoRepoApp`、`PackListScreen`、`PackManagerScreen`；Android 主页/设置返回、新建弹窗、长按菜单、系统文件选择器、编辑进入、返回放弃和完成保存真机验收 |
 | MANAGE-004 | 表情包重命名、删除及包内删除/置顶草稿具备一致性检查和失败回滚 | `management/emoticons.md`、`management/persistence.md` | verified | `EmoticonRepository`、`RecentUsageRepository`、`EmoticonRepositoryTest`、`PackEditDraftTest`；重命名/删除/草稿顺序/最近使用、提交前恢复及提交后清理 JVM 测试 |
-| MANAGE-005 | 包内多选“移动到”其他表情包，目标选择只修改草稿，完成时与删除及排序一起提交 | `ui/app.md`、`management/emoticons.md` | implemented | `PackManagerScreen`、`EmoticonRepository`；独立 JVM 仓库测试 26 项通过，覆盖批次排序、目标重复、本机最近使用及跨目标失败回滚。Android 构建及界面待验收 |
+| MANAGE-005 | 包内多选“移动到”其他表情包，目标选择只修改草稿，完成时与删除及排序一起提交 | `ui/app.md`、`management/emoticons.md` | verified | `PackManagerScreen`、`EmoticonRepository`；独立 JVM 仓库测试 26 项通过，含跨目标失败回滚；Pad 上目标取消保留勾选、返回不落盘、普通和折叠双目标提交、批次顺序、重复项、原图与本机最近使用通过 |
 | HOOK-004 | QQ 面板通过折叠入口选择低频包，设置入口按普通方式打开 App | `architecture/qq-panel.md` | verified | `CollapsedPackAdapter`、`PackTabAdapter`、普通 `ACTION_MAIN` 启动；折叠入口、选择层、选择目标包及 App 添加/列表路由切换真机验收 |
 | IMAGE-002 | 缩略图使用有界内存/磁盘缓存、并发去重和平台动画解码器加速 | `management/emoticons.md` | verified | `ThumbnailCache`、Coil 3.4；图片路径解析不等待 Git 同步仓库锁；Android 冷/热打开、滚动内存和 GIF 双帧验收 |
 | MANAGE-001 | 管理领域层支持单个和批量导入、删除、移动表情 | `management/emoticons.md` | verified | `EmoticonRepository`、`EmoticonRepositoryTest` |
